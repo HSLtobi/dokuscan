@@ -1,82 +1,188 @@
 #!/usr/bin/env node
 'use strict';
 
-const express = require('express');
-const path    = require('path');
-const fs      = require('fs');
+const express  = require('express');
+const path     = require('path');
+const fs       = require('fs');
+const multer   = require('multer');
+const archiver = require('archiver');
 require('dotenv').config();
 
-const app    = express();
-const PORT   = process.env.WEB_PORT  || 3001;
-const ARCHIV = process.env.SCAN_ARCHIV || '/home/pi/Scanner/Archiv';
+const app     = express();
+const PORT    = process.env.WEB_PORT   || 3001;
+const ARCHIV  = process.env.SCAN_ARCHIV  || '/home/pi/Scanner/Archiv';
 const EINGANG = process.env.SCAN_EINGANG || '/home/pi/Scanner/Eingang';
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// API: Alle Dokumente
+// Multer: Uploads direkt in den Scanner-Eingang
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => { fs.mkdirSync(EINGANG, { recursive: true }); cb(null, EINGANG); },
+    filename:    (req, file, cb) => cb(null, file.originalname),
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  fileFilter: (req, file, cb) => {
+    const ok = ['.pdf','.jpg','.jpeg','.png','.tiff','.tif','.webp'];
+    cb(null, ok.includes(path.extname(file.originalname).toLowerCase()));
+  }
+});
+
+// ── Hilfsfunktionen ───────────────────────────────────────────────────────────
+function safeAbs(rel) {
+  const full = path.resolve(path.join(ARCHIV, rel));
+  if (!full.startsWith(path.resolve(ARCHIV))) throw new Error('Path traversal');
+  return full;
+}
+
+function readMeta(filePath) {
+  try { return JSON.parse(fs.readFileSync(filePath + '.meta.json', 'utf8')); } catch { return {}; }
+}
+
+function docFromFile(kat, file) {
+  const filePath  = path.join(ARCHIV, kat, file);
+  const stat      = fs.statSync(filePath);
+  const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
+  const meta      = readMeta(filePath);
+  return {
+    id:             Buffer.from(path.join(kat, file)).toString('base64'),
+    name:           file,
+    kategorie:      kat,
+    datum:          meta.datum           || (dateMatch ? dateMatch[1] : null),
+    absender:       meta.absender        || null,
+    betrag:         meta.betrag          || null,
+    zusammenfassung:meta.zusammenfassung || null,
+    size:           stat.size,
+    modified:       stat.mtime.toISOString(),
+    path:           path.join(kat, file)
+  };
+}
+
+// ── API: Alle Dokumente ───────────────────────────────────────────────────────
 app.get('/api/documents', (req, res) => {
   const docs = [];
   if (!fs.existsSync(ARCHIV)) return res.json([]);
-
   for (const kat of fs.readdirSync(ARCHIV)) {
     const katDir = path.join(ARCHIV, kat);
     if (!fs.statSync(katDir).isDirectory()) continue;
     for (const file of fs.readdirSync(katDir)) {
       if (file.startsWith('.') || file.endsWith('.meta.json')) continue;
-      const filePath = path.join(katDir, file);
-      const stat = fs.statSync(filePath);
-      const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
-
-      // Metadaten aus .meta.json lesen
-      let meta = {};
-      try { meta = JSON.parse(fs.readFileSync(filePath + '.meta.json', 'utf8')); } catch {}
-
-      docs.push({
-        id:             Buffer.from(path.join(kat, file)).toString('base64'),
-        name:           file,
-        kategorie:      kat,
-        datum:          meta.datum          || (dateMatch ? dateMatch[1] : null),
-        absender:       meta.absender       || null,
-        betrag:         meta.betrag         || null,
-        zusammenfassung:meta.zusammenfassung|| null,
-        size:           stat.size,
-        modified:       stat.mtime.toISOString(),
-        path:           path.join(kat, file)
-      });
+      try { docs.push(docFromFile(kat, file)); } catch {}
     }
   }
   docs.sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
   res.json(docs);
 });
 
-// API: Eingang (ausstehend)
+// ── API: Eingang ──────────────────────────────────────────────────────────────
 app.get('/api/pending', (req, res) => {
   if (!fs.existsSync(EINGANG)) return res.json([]);
-  const files = fs.readdirSync(EINGANG).filter(f => !f.startsWith('.'));
-  res.json(files);
+  res.json(fs.readdirSync(EINGANG).filter(f => !f.startsWith('.')));
 });
 
-// API: Datei herunterladen
+// ── API: Upload ───────────────────────────────────────────────────────────────
+app.post('/api/upload', upload.array('files', 20), (req, res) => {
+  if (!req.files?.length) return res.status(400).json({ error: 'Keine Dateien' });
+  res.json({ uploaded: req.files.map(f => f.originalname) });
+});
+
+// ── API: Download einzelne Datei ──────────────────────────────────────────────
 app.get('/api/download/:id', (req, res) => {
   try {
     const rel  = Buffer.from(req.params.id, 'base64').toString();
-    const full = path.join(ARCHIV, rel);
-    // Sicherheitscheck: kein Path-Traversal
-    if (!full.startsWith(ARCHIV)) return res.status(403).send('Verboten');
-    if (!fs.existsSync(full))     return res.status(404).send('Nicht gefunden');
+    const full = safeAbs(rel);
+    if (!fs.existsSync(full)) return res.status(404).send('Nicht gefunden');
     res.download(full);
   } catch { res.status(400).send('Ungültige ID'); }
 });
 
-// API: Status
+// ── API: ZIP-Export ───────────────────────────────────────────────────────────
+// Query-Params: ?kat=Rechnung&year=2024  (leer = alles)
+app.get('/api/export-zip', (req, res) => {
+  const filterKat  = req.query.kat  || '';
+  const filterYear = req.query.year || '';
+
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="DokuScan_${new Date().toISOString().split('T')[0]}.zip"`);
+
+  const archive = archiver('zip', { zlib: { level: 6 } });
+  archive.pipe(res);
+
+  if (fs.existsSync(ARCHIV)) {
+    for (const kat of fs.readdirSync(ARCHIV)) {
+      if (filterKat && kat !== filterKat) continue;
+      const katDir = path.join(ARCHIV, kat);
+      if (!fs.statSync(katDir).isDirectory()) continue;
+      for (const file of fs.readdirSync(katDir)) {
+        if (file.startsWith('.') || file.endsWith('.meta.json')) continue;
+        if (filterYear && !file.startsWith(filterYear)) continue;
+        archive.file(path.join(katDir, file), { name: path.join(kat, file) });
+      }
+    }
+  }
+  archive.finalize();
+});
+
+// ── API: Umbenennen ───────────────────────────────────────────────────────────
+app.patch('/api/rename/:id', (req, res) => {
+  try {
+    const { newName } = req.body;
+    if (!newName || newName.includes('/') || newName.includes('..'))
+      return res.status(400).json({ error: 'Ungültiger Name' });
+
+    const rel     = Buffer.from(req.params.id, 'base64').toString();
+    const oldFull = safeAbs(rel);
+    const kat     = path.dirname(rel);
+    const newFull = safeAbs(path.join(kat, newName));
+
+    if (!fs.existsSync(oldFull)) return res.status(404).json({ error: 'Nicht gefunden' });
+    fs.renameSync(oldFull, newFull);
+
+    // Meta-Datei mitverschieben
+    const oldMeta = oldFull + '.meta.json';
+    const newMeta = newFull + '.meta.json';
+    if (fs.existsSync(oldMeta)) fs.renameSync(oldMeta, newMeta);
+
+    res.json(docFromFile(kat, newName));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── API: Kat ändern ───────────────────────────────────────────────────────────
+app.patch('/api/kategorize/:id', (req, res) => {
+  try {
+    const { newKat } = req.body;
+    const validKats  = ['Rechnung','Vertrag','Kontoauszug','Versicherung','Brief','Steuer','Behoerde','Medizin','Sonstiges'];
+    if (!validKats.includes(newKat)) return res.status(400).json({ error: 'Ungültige Kategorie' });
+
+    const rel     = Buffer.from(req.params.id, 'base64').toString();
+    const oldFull = safeAbs(rel);
+    const file    = path.basename(rel);
+    const newDir  = path.join(ARCHIV, newKat);
+    fs.mkdirSync(newDir, { recursive: true });
+    const newFull = path.join(newDir, file);
+
+    fs.renameSync(oldFull, newFull);
+    const oldMeta = oldFull + '.meta.json';
+    const newMeta = newFull + '.meta.json';
+    if (fs.existsSync(oldMeta)) {
+      const meta = readMeta(oldFull);
+      meta.kategorie = newKat;
+      fs.writeFileSync(newMeta, JSON.stringify(meta, null, 2));
+      fs.unlinkSync(oldMeta);
+    }
+
+    res.json(docFromFile(newKat, file));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── API: Status ───────────────────────────────────────────────────────────────
 app.get('/api/status', (req, res) => {
   const { execSync } = require('child_process');
   try {
     const out = execSync('systemctl is-active dokuscan', { encoding: 'utf8' }).trim();
     res.json({ scanner: out });
-  } catch {
-    res.json({ scanner: 'inactive' });
-  }
+  } catch { res.json({ scanner: 'inactive' }); }
 });
 
 app.listen(PORT, '0.0.0.0', () => {

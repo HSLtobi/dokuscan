@@ -3,378 +3,497 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DokuScan Pro</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <title>DokuScan</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'DM Mono', 'Courier New', monospace; background: #080808; color: #e8e4dc; min-height: 100vh; }
-    ::-webkit-scrollbar { width: 3px; }
-    ::-webkit-scrollbar-track { background: #111; }
-    ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
-
-    .btn { cursor: pointer; transition: opacity .15s; border: none; background: none; font-family: inherit; color: inherit; }
-    .btn:hover { opacity: .6; }
-    .pill { cursor: pointer; transition: background .1s; }
-    .pill:hover { background: #111 !important; }
-    .tab { cursor: pointer; transition: all .15s; }
-    .fade-in { animation: fi .3s ease; }
-    @keyframes fi { from { opacity:0; transform:translateY(5px); } to { opacity:1; } }
-    .spin { animation: spin 1s linear infinite; display: inline-block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .doc-row:hover { background: #0f0f0f !important; }
-
-    select, input {
-      background: #0f0f0f; border: 1px solid #1e1e1e; color: #e8e4dc;
-      font-family: inherit; outline: none; border-radius: 5px;
+    :root {
+      --bg: #05050a;
+      --surface: rgba(255,255,255,.03);
+      --surface-hover: rgba(255,255,255,.06);
+      --border: rgba(255,255,255,.06);
+      --border-bright: rgba(255,255,255,.12);
+      --text: #f0ede8;
+      --muted: #4a4a5a;
+      --accent: #6366f1;
+      --accent-glow: rgba(99,102,241,.25);
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
     }
-    select { cursor: pointer; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 2px; }
+
+    /* ── Layout ── */
+    .shell { display: grid; grid-template-rows: 56px 1px auto 1fr; height: 100vh; }
+    .content { display: grid; grid-template-columns: 220px 1px 1fr; flex: 1; overflow: hidden; height: 100%; }
+    .divider { background: var(--border); }
+
+    /* ── Top bar ── */
+    .topbar {
+      display: flex; align-items: center; gap: 16px;
+      padding: 0 24px; border-bottom: 1px solid var(--border);
+      background: rgba(5,5,10,.8); backdrop-filter: blur(20px);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .logo {
+      font-size: 15px; font-weight: 700; letter-spacing: -.3px;
+      background: linear-gradient(135deg, #fff 30%, var(--accent));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 20px;
+      border: 1px solid var(--border); font-size: 11px; color: var(--muted);
+    }
+    .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+    .status-pill.on .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .status-pill.on { color: var(--green); border-color: rgba(34,197,94,.2); }
+
+    .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 500;
+      cursor: pointer; border: none; font-family: inherit; transition: all .15s;
+    }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-bright); }
+    .btn-accent { background: var(--accent); color: #fff; box-shadow: 0 0 20px var(--accent-glow); }
+    .btn-accent:hover { filter: brightness(1.1); }
+    .btn-zip { background: rgba(245,158,11,.1); color: var(--amber); border: 1px solid rgba(245,158,11,.2); }
+    .btn-zip:hover { background: rgba(245,158,11,.2); }
+
+    /* ── Stat bar ── */
+    .statbar {
+      display: flex; align-items: center; gap: 0;
+      padding: 0 24px; background: rgba(255,255,255,.015);
+      border-bottom: 1px solid var(--border);
+    }
+    .stat { display: flex; align-items: baseline; gap: 8px; padding: 12px 24px 12px 0; }
+    .stat-val { font-size: 24px; font-weight: 700; letter-spacing: -1px; }
+    .stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    .stat-sep { width: 1px; height: 24px; background: var(--border); margin: 0 24px 0 0; }
+    .prog-wrap { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .prog-bar { width: 140px; height: 2px; background: rgba(255,255,255,.06); border-radius: 1px; overflow: hidden; }
+    .prog-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 1px; transition: width .5s ease; }
+    .prog-pct { font-size: 11px; color: var(--muted); min-width: 32px; text-align: right; }
+
+    /* ── Sidebar ── */
+    .sidebar { overflow-y: auto; padding: 16px 0; }
+    .sidebar-title { font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; padding: 0 16px 10px; }
+    .cat-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; cursor: pointer; font-size: 12px; color: var(--muted);
+      border-left: 2px solid transparent; transition: all .12s; position: relative;
+    }
+    .cat-item:hover { background: var(--surface-hover); color: var(--text); }
+    .cat-item.active { background: var(--surface); color: var(--text); }
+    .cat-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .cat-count { margin-left: auto; font-size: 10px; color: var(--muted); }
+    .cat-item.active .cat-count { color: var(--text); }
+
+    /* ── Main panel ── */
+    .main { display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Toolbar */
+    .toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .search-wrap { flex: 1; position: relative; }
+    .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; pointer-events: none; }
+    .search-input {
+      width: 100%; padding: 8px 12px 8px 34px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface);
+      font-size: 12px; color: var(--text); font-family: inherit; outline: none;
+      transition: border-color .15s;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--accent); background: rgba(99,102,241,.04); }
+    .year-sel {
+      padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface); font-size: 12px; color: var(--text); font-family: inherit;
+      outline: none; cursor: pointer;
+    }
+    .view-toggle { display: flex; background: rgba(255,255,255,.04); border-radius: 8px; padding: 3px; gap: 2px; }
+    .view-btn {
+      padding: 5px 12px; border-radius: 6px; font-size: 11px; border: none;
+      font-family: inherit; cursor: pointer; color: var(--muted); background: transparent; transition: all .12s;
+    }
+    .view-btn.active { background: rgba(255,255,255,.08); color: var(--text); }
+    .doc-count { font-size: 11px; color: var(--muted); white-space: nowrap; padding: 0 4px; }
+
+    /* Processing banner */
+    .processing-bar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 20px; font-size: 12px;
+      background: linear-gradient(90deg, rgba(99,102,241,.12), rgba(99,102,241,.04));
+      border-bottom: 1px solid rgba(99,102,241,.15);
+    }
+    .processing-spinner { width: 14px; height: 14px; border: 1.5px solid rgba(99,102,241,.3); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Doc list */
+    .doc-list { flex: 1; overflow-y: auto; padding: 0; }
+    .list-head {
+      display: grid; grid-template-columns: 40px 1fr 160px 100px 120px 100px;
+      gap: 12px; padding: 8px 20px; font-size: 10px; color: var(--muted);
+      letter-spacing: 1px; text-transform: uppercase; position: sticky; top: 0;
+      background: rgba(5,5,10,.95); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); z-index: 2;
+    }
+    .doc-row {
+      display: grid; grid-template-columns: 40px 1fr 160px 100px 120px 100px;
+      gap: 12px; padding: 10px 20px; align-items: center;
+      border-bottom: 1px solid var(--border); transition: background .1s; cursor: default;
+    }
+    .doc-row:hover { background: var(--surface-hover); }
+    .doc-icon {
+      width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center;
+      justify-content: center; font-size: 14px; flex-shrink: 0;
+    }
+    .doc-name-text {
+      font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      cursor: pointer; border-radius: 4px; padding: 2px 4px; margin: -2px -4px; transition: background .1s;
+    }
+    .doc-name-text:hover { background: rgba(255,255,255,.05); }
+    .doc-sub { font-size: 11px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .col-text { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .col-amount { font-size: 12px; font-weight: 500; color: var(--amber); }
+    .col-dl { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+    .dl-link {
+      width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+      border-radius: 7px; border: 1px solid var(--border); color: var(--muted);
+      text-decoration: none; font-size: 13px; transition: all .12s;
+    }
+    .dl-link:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-bright); }
+
+    /* Inline edit */
+    .name-edit-input {
+      width: 100%; background: rgba(99,102,241,.08); border: 1px solid var(--accent);
+      border-radius: 4px; color: var(--text); font-family: inherit; font-size: 12px;
+      font-weight: 500; padding: 2px 6px; outline: none;
+    }
+
+    /* Kat select inline */
+    .kat-sel {
+      font-family: inherit; font-size: 10px; border-radius: 6px; padding: 3px 6px;
+      border: 1px solid; background: transparent; cursor: pointer; outline: none;
+      font-weight: 500; letter-spacing: .3px;
+    }
+
+    /* Empty state */
+    .empty {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; color: var(--muted);
+    }
+    .empty-icon { font-size: 40px; opacity: .3; }
+    .empty-text { font-size: 13px; }
+
+    /* Drop overlay */
+    #dropOverlay {
+      display: none; position: fixed; inset: 0; z-index: 100;
+      background: rgba(5,5,10,.88); backdrop-filter: blur(12px);
+      flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+      pointer-events: none;
+    }
+    #dropOverlay.on { display: flex; }
+    .drop-ring {
+      width: 120px; height: 120px; border-radius: 50%;
+      border: 2px dashed var(--accent); display: flex; align-items: center; justify-content: center;
+      font-size: 36px; animation: pulse 1.5s ease-in-out infinite;
+      box-shadow: 0 0 40px var(--accent-glow);
+    }
+    @keyframes pulse { 0%,100%{opacity:.7;transform:scale(1)} 50%{opacity:1;transform:scale(1.05)} }
+    .drop-text { font-size: 16px; font-weight: 600; color: var(--accent); }
+    .drop-sub { font-size: 12px; color: var(--muted); }
+
+    /* Folder view */
+    .folder-grid { padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; align-content: start; }
+    .folder-card {
+      border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+      background: var(--surface); transition: border-color .15s;
+    }
+    .folder-card:hover { border-color: var(--border-bright); }
+    .folder-card-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+    }
+    .folder-card-name { font-size: 12px; font-weight: 600; }
+    .folder-card-count { margin-left: auto; font-size: 10px; color: var(--muted); }
+    .folder-file {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 14px; font-size: 11px; color: var(--muted);
+      border-bottom: 1px solid var(--border); text-decoration: none; transition: background .1s;
+    }
+    .folder-file:last-child { border-bottom: none; }
+    .folder-file:hover { background: var(--surface-hover); color: var(--text); }
+    .folder-file-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   </style>
 </head>
 <body>
 
+<div id="dropOverlay">
+  <div class="drop-ring">⬆</div>
+  <div class="drop-text">Dateien ablegen</div>
+  <div class="drop-sub">PDF · JPG · PNG · TIFF · WEBP</div>
+</div>
+
 <div id="app"></div>
 
 <script>
-const CATEGORIES = {
-  Rechnung:    { icon: "◈", color: "#f59e0b" },
-  Vertrag:     { icon: "◉", color: "#3b82f6" },
-  Kontoauszug: { icon: "◆", color: "#10b981" },
-  Versicherung:{ icon: "◎", color: "#8b5cf6" },
-  Brief:       { icon: "◇", color: "#ec4899" },
-  Steuer:      { icon: "◑", color: "#ef4444" },
-  Behoerde:    { icon: "▣", color: "#f97316" },
-  Medizin:     { icon: "✦", color: "#06b6d4" },
-  Sonstiges:   { icon: "◐", color: "#6b7280" },
+const CATS = {
+  Rechnung:    { color: '#f59e0b', bg: 'rgba(245,158,11,.12)', emoji: '🧾' },
+  Vertrag:     { color: '#6366f1', bg: 'rgba(99,102,241,.12)',  emoji: '📋' },
+  Kontoauszug: { color: '#22c55e', bg: 'rgba(34,197,94,.12)',   emoji: '💳' },
+  Versicherung:{ color: '#8b5cf6', bg: 'rgba(139,92,246,.12)',  emoji: '🛡️' },
+  Brief:       { color: '#ec4899', bg: 'rgba(236,72,153,.12)',  emoji: '✉️' },
+  Steuer:      { color: '#ef4444', bg: 'rgba(239,68,68,.12)',   emoji: '📊' },
+  Behoerde:    { color: '#f97316', bg: 'rgba(249,115,22,.12)',  emoji: '🏛️' },
+  Medizin:     { color: '#06b6d4', bg: 'rgba(6,182,212,.12)',   emoji: '🩺' },
+  Sonstiges:   { color: '#6b7280', bg: 'rgba(107,114,128,.12)', emoji: '📄' },
 };
-const CAT_KEYS = Object.keys(CATEGORIES);
+const CAT_KEYS = Object.keys(CATS);
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let state = {
-  docs: [],
-  pending: [],
-  scannerActive: false,
-  filter: "Alle",
-  view: "liste",
-  search: "",
-  year: "",
-};
-
-function setState(patch) {
-  Object.assign(state, patch);
-  render();
-}
+let S = { docs:[], pending:[], active:false, kat:'Alle', view:'liste', q:'', year:'', editing:null };
+function set(p) { Object.assign(S, p); render(); }
 
 // ── API ───────────────────────────────────────────────────────────────────────
-async function loadDocs() {
-  const [docsRes, pendRes, statusRes] = await Promise.all([
-    fetch("/api/documents"), fetch("/api/pending"), fetch("/api/status")
-  ]);
-  const docs    = await docsRes.json();
-  const pending = await pendRes.json();
-  const status  = await statusRes.json();
-  setState({ docs, pending, scannerActive: status.scanner === "active" });
+async function load() {
+  const [d,p,s] = await Promise.all([fetch('/api/documents'),fetch('/api/pending'),fetch('/api/status')]);
+  set({ docs:await d.json(), pending:await p.json(), active:(await s.json()).scanner==='active' });
+}
+async function upload(files) {
+  const fd=new FormData();
+  for(const f of files) fd.append('files',f);
+  await fetch('/api/upload',{method:'POST',body:fd});
+  load();
+}
+async function rename(id, newName) {
+  const r=await fetch(`/api/rename/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({newName})});
+  if(!r.ok){alert('Fehler beim Umbenennen');return;}
+  const u=await r.json();
+  set({docs:S.docs.map(d=>d.id===id?u:d),editing:null});
+}
+async function changeKat(id, newKat) {
+  const r=await fetch(`/api/kategorize/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({newKat})});
+  if(!r.ok){alert('Fehler');return;}
+  const u=await r.json();
+  set({docs:S.docs.map(d=>d.id===id?u:d)});
 }
 
-// ── Filters ───────────────────────────────────────────────────────────────────
-function getFiltered() {
-  return state.docs.filter(d => {
-    if (state.filter !== "Alle" && d.kategorie !== state.filter) return false;
-    if (state.year && (!d.datum || !d.datum.startsWith(state.year))) return false;
-    if (state.search.trim()) {
-      const q = state.search.toLowerCase();
-      if (!d.name.toLowerCase().includes(q)) return false;
-    }
+// ── Computed ──────────────────────────────────────────────────────────────────
+function vis() {
+  return S.docs.filter(d=>{
+    if(S.kat!=='Alle'&&d.kategorie!==S.kat)return false;
+    if(S.year&&(!d.datum||!d.datum.startsWith(S.year)))return false;
+    if(S.q.trim()){const q=S.q.toLowerCase();if(!d.name.toLowerCase().includes(q)&&!(d.absender||'').toLowerCase().includes(q))return false;}
     return true;
   });
 }
+function getYears(){return[...new Set(S.docs.map(d=>d.datum?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a);}
+function getCounts(){const c={Alle:S.docs.length};for(const d of S.docs)c[d.kategorie]=(c[d.kategorie]||0)+1;return c;}
+function fmt(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';return(b/1048576).toFixed(1)+' MB';}
 
-function getYears() {
-  return [...new Set(state.docs.map(d => d.datum?.substring(0,4)).filter(Boolean))].sort((a,b)=>b-a);
-}
-
-function getCounts() {
-  const c = { Alle: state.docs.length };
-  for (const d of state.docs) c[d.kategorie] = (c[d.kategorie]||0) + 1;
-  return c;
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function fmt(bytes) {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1048576) return (bytes/1024).toFixed(1) + " KB";
-  return (bytes/1048576).toFixed(1) + " MB";
-}
-
-// ── Render helpers ────────────────────────────────────────────────────────────
-function h(tag, attrs, ...children) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})) {
-    if (k === "style" && typeof v === "object") Object.assign(el.style, v);
-    else if (k.startsWith("on")) el.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (k === "className") el.className = v;
-    else el.setAttribute(k, v);
+// ── DOM ───────────────────────────────────────────────────────────────────────
+function h(tag,attrs,...kids){
+  const el=document.createElement(tag);
+  for(const[k,v]of Object.entries(attrs||{})){
+    if(k==='style'&&typeof v==='object')Object.assign(el.style,v);
+    else if(k.startsWith('on'))el.addEventListener(k.slice(2).toLowerCase(),v);
+    else if(k==='cls')el.className=v;
+    else el.setAttribute(k,v);
   }
-  for (const child of children.flat()) {
-    if (child == null) continue;
-    el.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
-  }
+  for(const c of kids.flat())if(c!=null)el.appendChild(typeof c==='string'?document.createTextNode(c):c);
   return el;
 }
 
-// ── Components ────────────────────────────────────────────────────────────────
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() {
+  const app=document.getElementById('app');
+  app.innerHTML='';
 
-function StatBar() {
-  const done  = state.docs.length;
-  const busy  = state.pending.length;
-  const pct   = done + busy > 0 ? Math.round(done / (done + busy) * 100) : 100;
+  const docs=vis(), yrs=getYears(), counts=getCounts();
+  const done=S.docs.length, busy=S.pending.length, pct=done+busy>0?Math.round(done/(done+busy)*100):100;
 
-  const item = (label, val, col) => h("div", { style: { display:"flex", gap:8, alignItems:"baseline" }},
-    h("span", { style: { fontFamily:"Syne,sans-serif", fontSize:22, fontWeight:800, color:col }}, String(val)),
-    h("span", { style: { fontSize:10, color:"#333", letterSpacing:1 }}, label.toUpperCase())
-  );
+  // ── Topbar ──
+  const fileInput=h('input',{type:'file',accept:'.pdf,.jpg,.jpeg,.png,.tiff,.tif,.webp',multiple:true,style:{display:'none'},
+    onChange:e=>{if(e.target.files.length)upload(Array.from(e.target.files));e.target.value='';}});
 
-  return h("div", { style: { display:"flex", gap:24, alignItems:"center", padding:"12px 28px", borderBottom:"1px solid #1a1a1a", background:"#080808" }},
-    item("Archiviert", done, "#10b981"),
-    item("In Eingang", busy, busy > 0 ? "#f59e0b" : "#333"),
-    h("div", { style: { marginLeft:"auto", display:"flex", alignItems:"center", gap:10 }},
-      h("div", { style: { width:120, height:3, background:"#1a1a1a", borderRadius:2 }},
-        h("div", { style: { width:pct+"%", height:"100%", background:"#10b981", borderRadius:2, transition:"width .4s" }})
+  const topbar=h('div',{cls:'topbar'},
+    h('div',{cls:'logo'},'DokuScan'),
+    h('div',{cls:`status-pill${S.active?' on':''}`},
+      h('div',{cls:'dot'}),
+      S.active?'Scanner aktiv':'Scanner inaktiv'
+    ),
+    h('div',{cls:'topbar-actions'},
+      h('label',{style:{cursor:'pointer'}},
+        fileInput,
+        h('span',{cls:'btn btn-ghost',onClick:()=>fileInput.click()},'⬆ Upload')
       ),
-      h("span", { style: { fontSize:11, color:"#444" }}, pct + "%")
+      h('div',{cls:'view-toggle'},
+        h('button',{cls:`view-btn${S.view==='liste'?' active':''}`,onClick:()=>set({view:'liste'})},'Liste'),
+        h('button',{cls:`view-btn${S.view==='ordner'?' active':''}`,onClick:()=>set({view:'ordner'})},'Ordner')
+      ),
+      h('button',{cls:'btn btn-zip',onClick:()=>{
+        const p=new URLSearchParams();
+        if(S.kat!=='Alle')p.set('kat',S.kat);
+        if(S.year)p.set('year',S.year);
+        const qs=p.toString();window.location='/api/export-zip'+(qs?'?'+qs:'');
+      }},'⬇ ZIP')
     )
   );
-}
 
-function Sidebar() {
-  const counts = getCounts();
-  const all = ["Alle", ...CAT_KEYS.filter(k => counts[k])];
-  const wrap = h("div", { style: { paddingTop:16 }});
-  h("div", { style: { padding:"0 16px 8px", fontSize:9, color:"#333", letterSpacing:2 }}, "KATEGORIEN").appendTo;
-  wrap.appendChild(h("div", { style: { padding:"0 16px 8px", fontSize:9, color:"#333", letterSpacing:2 }}, "KATEGORIEN"));
+  // ── StatBar ──
+  const statbar=h('div',{cls:'statbar'},
+    h('div',{cls:'stat'},h('span',{cls:'stat-val',style:{color:'#22c55e'}},String(done)),h('span',{cls:'stat-lbl'},'Archiviert')),
+    h('div',{cls:'stat-sep'}),
+    h('div',{cls:'stat'},h('span',{cls:'stat-val',style:{color:busy>0?'#f59e0b':'#2a2a3a'}},String(busy)),h('span',{cls:'stat-lbl'},'In Eingang')),
+    h('div',{cls:'stat-sep'}),
+    h('div',{cls:'stat'},h('span',{cls:'stat-val',style:{color:'#6366f1'}},String(CAT_KEYS.filter(k=>counts[k]).length)),h('span',{cls:'stat-lbl'},'Kategorien')),
+    h('div',{cls:'prog-wrap'},
+      h('div',{cls:'prog-bar'},h('div',{cls:'prog-fill',style:{width:pct+'%'}})),
+      h('span',{cls:'prog-pct'},pct+'%')
+    )
+  );
 
-  for (const cat of all) {
-    const active = state.filter === cat;
-    const info   = CATEGORIES[cat];
-    const count  = counts[cat] || 0;
-    const item   = h("div", {
-      className: "pill",
-      style: {
-        padding:"7px 16px", display:"flex", alignItems:"center", gap:8,
-        borderLeft: `2px solid ${active ? (info?.color||"#f59e0b") : "transparent"}`,
-        background: active ? "#0f0f0f" : "none",
-        color: active ? "#e8e4dc" : "#444", fontSize:12,
-      },
-      onClick: () => setState({ filter: cat })
-    },
-      h("span", { style:{ fontSize:13 }}, info?.icon || "◈"),
-      h("span", { style:{ flex:1 }}, cat),
-      count > 0 ? h("span", { style:{ fontSize:9, color: info?.color||"#f59e0b" }}, String(count)) : null
+  // ── Sidebar ──
+  const sidebar=h('div',{cls:'sidebar'});
+  sidebar.appendChild(h('div',{cls:'sidebar-title'},'Kategorien'));
+  for(const cat of ['Alle',...CAT_KEYS.filter(k=>counts[k])]){
+    const info=CATS[cat], active=S.kat===cat, cnt=counts[cat]||0;
+    const item=h('div',{cls:`cat-item${active?' active':''}`,onClick:()=>set({kat:cat})},
+      h('div',{cls:'cat-dot',style:{background:info?.color||'#6366f1',boxShadow:active?`0 0 6px ${info?.color||'#6366f1'}`:'none'}}),
+      h('span',{},cat),
+      cnt>0?h('span',{cls:'cat-count'},String(cnt)):null
     );
-    wrap.appendChild(item);
+    if(active)item.style.borderLeftColor=info?.color||'#6366f1';
+    sidebar.appendChild(item);
   }
-  return wrap;
-}
 
-function DocRow(doc) {
-  const info = CATEGORIES[doc.kategorie] || CATEGORIES.Sonstiges;
+  // ── Main ──
+  const qInput=h('input',{cls:'search-input',type:'text',placeholder:'Suche nach Name, Absender…'});
+  qInput.value=S.q;
+  qInput.addEventListener('input',e=>set({q:e.target.value}));
 
-  const row = h("div", {
-    className: "doc-row fade-in",
-    style: {
-      display:"grid", gridTemplateColumns:"22px 1fr 140px 100px 110px 90px",
-      gap:10, padding:"10px 12px", alignItems:"center",
-      borderBottom:"1px solid #141414",
+  const yrSel=h('select',{cls:'year-sel',onChange:e=>set({year:e.target.value})},
+    h('option',{value:''},'Alle Jahre'),
+    ...yrs.map(y=>{const o=h('option',{value:y},y);if(y===S.year)o.selected=true;return o;})
+  );
+
+  const toolbar=h('div',{cls:'toolbar'},
+    h('div',{cls:'search-wrap'},h('span',{cls:'search-icon'},'⌕'),qInput),
+    yrSel,
+    h('span',{cls:'doc-count'},docs.length+' Dok.')
+  );
+
+  let contentEl;
+
+  if(S.view==='ordner'){
+    const grid=h('div',{cls:'folder-grid'});
+    const byKat={};
+    for(const d of docs)(byKat[d.kategorie]=byKat[d.kategorie]||[]).push(d);
+    for(const[kat,kd]of Object.entries(byKat)){
+      const info=CATS[kat]||CATS.Sonstiges;
+      grid.appendChild(h('div',{cls:'folder-card'},
+        h('div',{cls:'folder-card-head',style:{borderLeftColor:info.color}},
+          h('span',{style:{fontSize:16}},info.emoji),
+          h('span',{cls:'folder-card-name',style:{color:info.color}},kat),
+          h('span',{cls:'folder-card-count'},kd.length)
+        ),
+        ...kd.map(d=>h('a',{cls:'folder-file',href:'/api/download/'+d.id},
+          h('span',{},info.emoji),
+          h('span',{cls:'folder-file-name'},d.name)
+        ))
+      ));
     }
-  },
-    // Icon
-    h("span", { style:{ fontSize:15, color:info.color }}, info.icon),
-    // Name + Zusammenfassung
-    h("div", { style:{ minWidth:0 }},
-      h("div", { style:{ fontSize:12, color:"#e8e4dc", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}, doc.name),
-      doc.zusammenfassung
-        ? h("div", { style:{ fontSize:10, color:"#383838", marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}, doc.zusammenfassung)
-        : h("div", { style:{ fontSize:10, color:"#2a2a2a", marginTop:2 }}, fmt(doc.size))
-    ),
-    // Absender
-    h("div", { style:{ fontSize:11, color:"#444", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}, doc.absender || "—"),
-    // Datum
-    h("div", { style:{ fontSize:11, color:"#444" }}, doc.datum || "—"),
-    // Betrag
-    h("div", { style:{ fontSize:11, color: doc.betrag ? "#f59e0b" : "#2a2a2a" }}, doc.betrag || "—"),
-    // Download
-    h("a", { href:"/api/download/"+doc.id, style:{
-      fontSize:11, color:"#444", textDecoration:"none", padding:"2px 4px"
-    }, title:"Herunterladen"}, "⬇")
-  );
-  return row;
-}
-
-function FolderView(docs) {
-  if (!docs.length) return h("div", { style:{padding:32, color:"#2a2a2a", fontSize:12, textAlign:"center"}}, "Keine Dokumente");
-  const byKat = {};
-  for (const d of docs) { (byKat[d.kategorie] = byKat[d.kategorie]||[]).push(d); }
-
-  const wrap = h("div", { style:{ padding:"16px 20px", fontSize:11 }});
-  for (const [kat, katDocs] of Object.entries(byKat)) {
-    const info = CATEGORIES[kat]||CATEGORIES.Sonstiges;
-    wrap.appendChild(h("div", { style:{ marginBottom:16 }},
-      h("div", { style:{ display:"flex", alignItems:"center", gap:8, marginBottom:6, color:info.color }},
-        h("span", {}, info.icon),
-        h("span", { style:{ fontWeight:600, letterSpacing:.5 }}, kat),
-        h("span", { style:{ color:"#333", fontSize:10 }}, "("+katDocs.length+")")
-      ),
-      ...katDocs.map(d =>
-        h("div", { style:{ paddingLeft:20, paddingBottom:4, display:"flex", alignItems:"center", gap:8 }},
-          h("span", { style:{ color:"#2a2a2a" }}, "└─"),
-          h("a", { href:"/api/download/"+d.id, style:{ color:"#444", textDecoration:"none", fontSize:11 }}, d.name)
-        )
-      )
-    ));
-  }
-  return wrap;
-}
-
-// ── Main render ───────────────────────────────────────────────────────────────
-function render() {
-  const app = document.getElementById("app");
-  app.innerHTML = "";
-
-  const filtered = getFiltered();
-  const years    = getYears();
-
-  // ── HEADER
-  const header = h("div", { style:{ display:"flex", alignItems:"center", padding:"16px 28px", borderBottom:"1px solid #141414" }},
-    h("div", { style:{ fontFamily:"Syne,sans-serif", fontSize:20, fontWeight:800, letterSpacing:-.5 }},
-      h("span", { style:{ color:"#f59e0b" }}, "DOKU"),
-      document.createTextNode("SCAN "),
-      h("span", { style:{ color:"#1f1f1f", fontSize:13, fontWeight:400 }}, "PRO")
-    ),
-    // Status dot
-    h("div", { style:{ display:"flex", alignItems:"center", gap:6, marginLeft:24 }},
-      h("div", { style:{
-        width:7, height:7, borderRadius:"50%",
-        background: state.scannerActive ? "#10b981" : "#444",
-        boxShadow: state.scannerActive ? "0 0 6px #10b981" : "none"
-      }}),
-      h("span", { style:{ fontSize:11, color:"#444" }}, state.scannerActive ? "Scanner aktiv" : "Scanner inaktiv")
-    ),
-    // View toggle
-    h("div", { style:{ marginLeft:28, display:"flex", gap:2, background:"#111", borderRadius:5, padding:2 }},
-      ...([["liste","≡ Liste"],["ordner","⊞ Ordner"]]).map(([v,lbl]) =>
-        h("button", {
-          className:"tab",
-          style:{ padding:"5px 14px", borderRadius:4, fontSize:11, border:"none", fontFamily:"inherit",
-                  background: state.view===v ? "#1e1e1e" : "none", color: state.view===v ? "#e8e4dc" : "#444" },
-          onClick: () => setState({ view: v })
-        }, lbl)
-      )
-    ),
-    // Right: SMB path
-    h("div", { style:{ marginLeft:"auto", fontSize:10, color:"#2a2a2a" }}, "\\\\dokubt.local\\Scanner")
-  );
-
-  // ── STAT BAR
-  const statBar = StatBar();
-
-  // ── LAYOUT
-  const sidebar = h("div", { style:{ width:200, borderRight:"1px solid #141414", overflowY:"auto", flexShrink:0 }},
-    Sidebar()
-  );
-
-  // ── MAIN
-  // Toolbar
-  const searchInput = h("input", {
-    type:"text", placeholder:"Suche nach Name…",
-    style:{ flex:1, fontSize:11, padding:"7px 10px 7px 28px" },
-    value: state.search
-  });
-  searchInput.value = state.search;
-  searchInput.addEventListener("input", e => setState({ search: e.target.value }));
-
-  const searchWrap = h("div", { style:{ flex:1, position:"relative" }},
-    h("span", { style:{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"#333", fontSize:13, pointerEvents:"none" }}, "⌕"),
-    searchInput
-  );
-
-  const yearSel = h("select", { style:{ fontSize:11, padding:"7px 10px" },
-    onChange: e => setState({ year: e.target.value }) },
-    h("option", { value:"" }, "Alle Jahre"),
-    ...years.map(y => {
-      const opt = h("option", { value:y }, y);
-      if (y === state.year) opt.selected = true;
-      return opt;
-    })
-  );
-
-  const toolbar = h("div", { style:{ display:"flex", gap:10, padding:"12px 20px", alignItems:"center", borderBottom:"1px solid #141414" }},
-    searchWrap, yearSel,
-    h("span", { style:{ fontSize:10, color:"#444", whiteSpace:"nowrap" }}, filtered.length+" Dokumente")
-  );
-
-  // Pending banner
-  let pendingBanner = null;
-  if (state.pending.length > 0) {
-    pendingBanner = h("div", { style:{
-      background:"linear-gradient(90deg,#7c5fc7,#5b8dee)", padding:"9px 20px",
-      fontSize:12, display:"flex", alignItems:"center", gap:10
-    }},
-      h("span", { className:"spin" }, "◌"),
-      h("span", {}, state.pending.length+" Dokument"+(state.pending.length>1?"e werden":"  wird")+" analysiert…"),
-      h("span", { style:{ marginLeft:"auto", fontSize:10, color:"rgba(255,255,255,.5)" }},
-        state.pending.join(", ").substring(0,60)+(state.pending.join(", ").length>60?"…":""))
+    contentEl=h('div',{cls:'doc-list'},grid);
+  } else if(docs.length){
+    const head=h('div',{cls:'list-head'},
+      h('span',{}),h('span',{},'Dateiname'),h('span',{},'Absender'),h('span',{},'Datum'),h('span',{},'Betrag'),h('span',{})
     );
-  }
+    const rows=docs.map(doc=>{
+      const info=CATS[doc.kategorie]||CATS.Sonstiges;
+      const isEd=S.editing===doc.id;
 
-  // Doc list / folder view
-  let content;
-  if (state.view === "ordner") {
-    content = h("div", { style:{ flex:1, overflowY:"auto" }}, FolderView(filtered));
-  } else if (filtered.length > 0) {
-    const tableHead = h("div", { style:{
-      display:"grid", gridTemplateColumns:"22px 1fr 140px 100px 110px 90px",
-      gap:10, padding:"6px 12px", fontSize:9, color:"#2a2a2a", letterSpacing:1.5,
-      borderBottom:"1px solid #141414"
-    }},
-      h("span",{}), h("span",{},"DATEINAME"), h("span",{},"ABSENDER"), h("span",{},"DATUM"), h("span",{},"BETRAG"), h("span",{},"")
-    );
-    const rows = h("div", {}, tableHead, ...filtered.map(DocRow));
-    content = h("div", { style:{ flex:1, overflowY:"auto", padding:"8px 20px" }}, rows);
+      let nameEl;
+      if(isEd){
+        const inp=h('input',{cls:'name-edit-input',value:doc.name,
+          onKeydown:e=>{if(e.key==='Enter'){e.preventDefault();rename(doc.id,e.target.value);}if(e.key==='Escape')set({editing:null});}});
+        setTimeout(()=>inp.focus(),30);
+        nameEl=h('div',{style:{minWidth:0}},inp,h('div',{cls:'doc-sub'},'↵ Speichern  ·  Esc Abbrechen'));
+      } else {
+        nameEl=h('div',{style:{minWidth:0}},
+          h('div',{cls:'doc-name-text',onClick:()=>set({editing:doc.id}),title:'Klicken zum Umbenennen'},doc.name),
+          doc.zusammenfassung?h('div',{cls:'doc-sub'},doc.zusammenfassung):h('div',{cls:'doc-sub'},fmt(doc.size))
+        );
+      }
+
+      const katSel=h('select',{cls:'kat-sel',style:{color:info.color,borderColor:info.color+'44',background:info.bg},
+        onChange:e=>changeKat(doc.id,e.target.value)},
+        ...CAT_KEYS.map(k=>{const o=h('option',{value:k},k);if(k===doc.kategorie)o.selected=true;return o;})
+      );
+
+      return h('div',{cls:'doc-row'},
+        h('div',{cls:'doc-icon',style:{background:info.bg}},h('span',{style:{fontSize:16}},info.emoji)),
+        nameEl,
+        h('div',{cls:'col-text'},doc.absender||'—'),
+        h('div',{cls:'col-text'},doc.datum||'—'),
+        doc.betrag?h('div',{cls:'col-amount'},doc.betrag):h('div',{cls:'col-text'},'—'),
+        h('div',{cls:'col-dl'},katSel,h('a',{cls:'dl-link',href:'/api/download/'+doc.id,title:'Download'},'↓'))
+      );
+    });
+    contentEl=h('div',{cls:'doc-list'},head,...rows);
   } else {
-    content = h("div", { style:{
-      flex:1, display:"flex", alignItems:"center", justifyContent:"center",
-      color:"#1e1e1e", fontSize:12
-    }}, state.docs.length > 0 ? "Keine Dokumente für diese Filter" : "Noch keine Dokumente im Archiv");
+    contentEl=h('div',{cls:'empty'},
+      h('div',{cls:'empty-icon'},S.docs.length>0?'🔍':'📂'),
+      h('div',{cls:'empty-text'},S.docs.length>0?'Keine Treffer — Filter anpassen':'Noch keine Dokumente')
+    );
   }
 
-  const main = h("div", { style:{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }},
-    toolbar,
-    ...(pendingBanner ? [pendingBanner] : []),
-    content
+  let processingEl=null;
+  if(S.pending.length>0){
+    processingEl=h('div',{cls:'processing-bar'},
+      h('div',{cls:'processing-spinner'}),
+      h('span',{style:{color:'#6366f1',fontWeight:500}},S.pending.length+' Dok.'),
+      h('span',{style:{color:'var(--muted)'}},'werden analysiert…')
+    );
+  }
+
+  const main=h('div',{cls:'main'},toolbar,...(processingEl?[processingEl]:[]),contentEl);
+
+  const shell=h('div',{cls:'shell'},
+    topbar,
+    h('div',{cls:'divider'}),
+    statbar,
+    h('div',{cls:'content'},sidebar,h('div',{cls:'divider'}),main)
   );
-
-  const layout = h("div", { style:{ display:"flex", height:"calc(100vh - 113px)" }}, sidebar, main);
-
-  app.appendChild(header);
-  app.appendChild(statBar);
-  app.appendChild(layout);
+  app.appendChild(shell);
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-loadDocs();
-setInterval(() => {
-  // Nur pending/status pollen wenn Dokumente im Eingang
-  fetch("/api/pending").then(r=>r.json()).then(p => {
-    if (p.length !== state.pending.length) loadDocs();
-    else if (p.length > 0) setState({ pending: p });
-  });
-}, 4000);
-setInterval(() => {
-  fetch("/api/status").then(r=>r.json()).then(s => {
-    const active = s.scanner === "active";
-    if (active !== state.scannerActive) setState({ scannerActive: active });
-  });
-}, 30000);
+// ── Drag & Drop ───────────────────────────────────────────────────────────────
+const overlay=document.getElementById('dropOverlay');
+let dc=0;
+document.addEventListener('dragenter',e=>{e.preventDefault();dc++;overlay.classList.add('on');});
+document.addEventListener('dragleave',()=>{if(--dc<=0){dc=0;overlay.classList.remove('on');}});
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>{
+  e.preventDefault();dc=0;overlay.classList.remove('on');
+  const files=Array.from(e.dataTransfer.files).filter(f=>/\.(pdf|jpe?g|png|tiff?|webp)$/i.test(f.name));
+  if(files.length)upload(files);
+});
+
+// ── Poll ──────────────────────────────────────────────────────────────────────
+load();
+setInterval(()=>{
+  fetch('/api/pending').then(r=>r.json()).then(p=>{if(p.length!==S.pending.length)load();else if(p.length>0)set({pending:p});});
+},4000);
+setInterval(()=>{
+  fetch('/api/status').then(r=>r.json()).then(s=>{const a=s.scanner==='active';if(a!==S.active)set({active:a});});
+},30000);
 </script>
 </body>
 </html>
