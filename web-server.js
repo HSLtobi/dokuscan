@@ -22,19 +22,26 @@ app.get('/api/documents', (req, res) => {
     const katDir = path.join(ARCHIV, kat);
     if (!fs.statSync(katDir).isDirectory()) continue;
     for (const file of fs.readdirSync(katDir)) {
-      if (file.startsWith('.')) continue;
+      if (file.startsWith('.') || file.endsWith('.meta.json')) continue;
       const filePath = path.join(katDir, file);
       const stat = fs.statSync(filePath);
-      // Datum aus Dateiname parsen: YYYY-MM-DD_...
       const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
+
+      // Metadaten aus .meta.json lesen
+      let meta = {};
+      try { meta = JSON.parse(fs.readFileSync(filePath + '.meta.json', 'utf8')); } catch {}
+
       docs.push({
-        id: Buffer.from(path.join(kat, file)).toString('base64'),
-        name: file,
-        kategorie: kat,
-        datum: dateMatch ? dateMatch[1] : null,
-        size: stat.size,
-        modified: stat.mtime.toISOString(),
-        path: path.join(kat, file)
+        id:             Buffer.from(path.join(kat, file)).toString('base64'),
+        name:           file,
+        kategorie:      kat,
+        datum:          meta.datum          || (dateMatch ? dateMatch[1] : null),
+        absender:       meta.absender       || null,
+        betrag:         meta.betrag         || null,
+        zusammenfassung:meta.zusammenfassung|| null,
+        size:           stat.size,
+        modified:       stat.mtime.toISOString(),
+        path:           path.join(kat, file)
       });
     }
   }

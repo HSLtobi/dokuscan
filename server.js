@@ -26,7 +26,7 @@ async function analyzeDocument(filePath) {
   const ext = path.extname(filePath).toLowerCase();
 
   const prompt = `Analysiere dieses Dokument. Antworte NUR mit validem JSON (kein Markdown):
-{"kategorie":"Rechnung|Vertrag|Kontoauszug|Versicherung|Brief|Steuer|Behoerde|Medizin|Sonstiges","datum":"YYYY-MM-DD oder null","absender":"Firmenname oder null","beschreibung":"max 5 Woerter"}`;
+{"kategorie":"Rechnung|Vertrag|Kontoauszug|Versicherung|Brief|Steuer|Behoerde|Medizin|Sonstiges","datum":"YYYY-MM-DD oder null","absender":"Firmenname oder null","beschreibung":"max 5 Woerter","betrag":"Betrag mit Währung als String oder null","zusammenfassung":"1-2 Sätze auf Deutsch"}`;
 
   if (['.jpg', '.jpeg', '.png', '.tiff', '.tif', '.webp'].includes(ext)) {
     const imageData = fs.readFileSync(filePath).toString('base64');
@@ -94,8 +94,21 @@ async function processFile(filePath) {
     const targetPath = path.join(targetDir, filename);
     fs.renameSync(filePath, targetPath);
 
+    // Metadaten als JSON-Begleitdatei speichern
+    const metaPath = targetPath + '.meta.json';
+    fs.writeFileSync(metaPath, JSON.stringify({
+      originalName: path.basename(filePath),
+      kategorie,
+      datum:          analysis.datum          || null,
+      absender:       analysis.absender       || null,
+      betrag:         analysis.betrag         || null,
+      zusammenfassung:analysis.zusammenfassung|| null,
+      beschreibung:   analysis.beschreibung   || null,
+      processedAt:    new Date().toISOString(),
+    }, null, 2));
+
     console.log(`[DokuScan] ✅ → ${kategorie}/${filename}`);
-    console.log(`           Absender: ${analysis.absender || '-'} | Datum: ${analysis.datum || '-'}`);
+    console.log(`           Absender: ${analysis.absender || '-'} | Datum: ${analysis.datum || '-'} | Betrag: ${analysis.betrag || '-'}`);
   } catch (err) {
     console.error(`[DokuScan] ❌ Fehler: ${err.message}`);
     const fallback = path.join(ARCHIV, 'Sonstiges');
