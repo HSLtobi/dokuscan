@@ -40,9 +40,23 @@ function getPageText(filePath, page) {
 function renderPageAsBase64(filePath, page) {
   try {
     const tmp = path.join(os.tmpdir(), `ds_p${page}_${Date.now()}`);
-    spawnSync('pdftoppm', ['-jpeg', '-r', '120', '-f', String(page), '-l', String(page), filePath, tmp]);
-    const imgPath = `${tmp}-${String(page).padStart(6,'0')}.jpg`;
-    if (!fs.existsSync(imgPath)) return null;
+    spawnSync('pdftoppm', ['-jpeg', '-r', '200', '-f', String(page), '-l', String(page), filePath, tmp]);
+
+    const dir     = path.dirname(tmp);
+    const prefix  = path.basename(tmp) + '-';
+    const matches = fs.readdirSync(dir).filter(f => f.startsWith(prefix) && f.endsWith('.jpg'));
+    if (!matches.length) return null;
+
+    let imgPath = path.join(dir, matches[0]);
+
+    // Kontrast verbessern mit ImageMagick falls verfügbar (hilft bei blassen Scans)
+    const enhanced = imgPath.replace('.jpg', '_enh.jpg');
+    const magick   = spawnSync('convert', [imgPath, '-normalize', '-contrast', '-contrast', enhanced]);
+    if (magick.status === 0 && fs.existsSync(enhanced)) {
+      fs.unlinkSync(imgPath);
+      imgPath = enhanced;
+    }
+
     const data = fs.readFileSync(imgPath).toString('base64');
     fs.unlinkSync(imgPath);
     return data;
@@ -168,10 +182,10 @@ async function analyzeDocument(filePath) {
     msgContent = `${prompt}\n\nDokumenteninhalt:\n${text || '(nicht lesbar)'}`;
   }
 
-  const res = await client.messages.create({
+  const res = await withRetry(() => client.messages.create({
     model: 'claude-opus-4-6', max_tokens: 512,
     messages: [{ role:'user', content: msgContent }]
-  });
+  }));
   return JSON.parse(res.content[0].text.match(/\{[\s\S]*\}/)[0]);
 }
 
@@ -195,7 +209,9 @@ async function archiveDocument(filePath, originalName) {
     counter++;
   }
 
-  fs.renameSync(filePath, targetPath);
+  // Cross-device safe: copy + delete statt rename
+  fs.copyFileSync(filePath, targetPath);
+  fs.unlinkSync(filePath);
   fs.writeFileSync(targetPath + '.meta.json', JSON.stringify({
     originalName,
     kategorie,
@@ -253,6 +269,48 @@ async function processFile(filePath) {
   }
 }
 
+// ── Warteschlange (sequenziell, kein paralleles Rate-Limit-Problem) ───────────
+const queue   = [];
+let processing = false;
+
+async function withRetry(fn, retries = 4) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err.message?.includes('429') || err.status === 429;
+      const isTimeout = err.message?.includes('timed out') || err.message?.includes('timeout');
+      if ((is429 || isTimeout) && attempt < retries) {
+        const wait = Math.pow(2, attempt + 2) * 1000; // 4s, 8s, 16s, 32s
+        console.log(`[DokuScan] ⏳ Rate limit / Timeout – warte ${wait/1000}s (Versuch ${attempt+1}/${retries})`);
+        await new Promise(r => setTimeout(r, wait));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
+async function runQueue() {
+  if (processing) return;
+  processing = true;
+  while (queue.length > 0) {
+    const filePath = queue.shift();
+    await processFile(filePath).catch(err =>
+      console.error(`[DokuScan] ❌ Queue-Fehler: ${err.message}`)
+    );
+    // Kurze Pause zwischen Dokumenten um Rate Limit zu schonen
+    if (queue.length > 0) await new Promise(r => setTimeout(r, 2000));
+  }
+  processing = false;
+}
+
+function enqueue(filePath) {
+  queue.push(filePath);
+  console.log(`[DokuScan] 📥 Eingereiht: ${path.basename(filePath)} (Queue: ${queue.length})`);
+  runQueue();
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 fs.mkdirSync(EINGANG, { recursive: true });
 fs.mkdirSync(ARCHIV,  { recursive: true });
@@ -263,6 +321,7 @@ const watcher = chokidar.watch(EINGANG, {
   awaitWriteFinish: { stabilityThreshold: 3000, pollInterval: 500 }
 });
 
-watcher.on('add', processFile);
+watcher.on('add', enqueue);
 console.log(`[DokuScan] 🚀 Bereit – überwache ${EINGANG}`);
-console.log(`[DokuScan] 🤖 KI-Dokumentgrenzerkennung aktiv`);
+console.log(`[DokuScan] 🤖 KI-Dokumentgrenzerkennung aktiv (sequenzielle Queue)`);
+
