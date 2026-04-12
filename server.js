@@ -19,6 +19,14 @@ function sanitize(str) {
   return (str||'').replace(/[^a-zA-Z0-9äöüÄÖÜß\-]/g,'_').replace(/_+/g,'_').substring(0,40);
 }
 
+function safePath(base, ...segments) {
+  const resolved = path.resolve(base, ...segments);
+  if (!resolved.startsWith(path.resolve(base))) {
+    throw new Error('Path traversal detected');
+  }
+  return resolved;
+}
+
 // ── Seitenanzahl ermitteln ────────────────────────────────────────────────────
 function getPageCount(filePath) {
   try {
