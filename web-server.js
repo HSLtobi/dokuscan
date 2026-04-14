@@ -102,6 +102,19 @@ app.get('/api/download/:id', (req, res) => {
   } catch { res.status(400).send('Ungültige ID'); }
 });
 
+// ── API: Vorschau einzelne Datei (inline im Browser) ─────────────────────────
+app.get('/api/preview/:id', (req, res) => {
+  try {
+    const rel  = Buffer.from(req.params.id, 'base64').toString();
+    const full = safeAbs(rel);
+    if (!fs.existsSync(full)) return res.status(404).send('Nicht gefunden');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    fs.createReadStream(full).pipe(res);
+  } catch { res.status(400).send('Ungültige ID'); }
+});
+
 // ── API: ZIP-Export ───────────────────────────────────────────────────────────
 app.get('/api/export-zip', (req, res) => {
   const filterKat  = req.query.kat  || '';

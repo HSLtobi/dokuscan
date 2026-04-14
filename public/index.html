@@ -258,6 +258,43 @@
     .folder-file:hover { background: var(--surface-hover); color: var(--text); }
     .folder-file-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+    /* ── PDF Preview Modal ── */
+    .pdf-overlay {
+      display: none; position: fixed; inset: 0; z-index: 300;
+      background: rgba(0,0,0,.85); backdrop-filter: blur(8px);
+      align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .2s ease;
+    }
+    .pdf-overlay.open { display: flex; }
+    .pdf-overlay.visible { opacity: 1; }
+    .pdf-modal {
+      background: #0d0d1a; border: 1px solid #2a2a4a;
+      border-radius: 12px; width: 90vw; height: 90vh;
+      display: flex; flex-direction: column; overflow: hidden;
+      transform: scale(0.95); transition: transform .2s ease;
+    }
+    .pdf-overlay.visible .pdf-modal { transform: scale(1); }
+    .pdf-modal-head {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px; border-bottom: 1px solid #2a2a4a; flex-shrink: 0;
+    }
+    .pdf-modal-title {
+      font-size: 13px; font-weight: 500; flex: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      color: var(--text);
+    }
+    .pdf-modal-close {
+      width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-family: inherit;
+      transition: all .12s; flex-shrink: 0;
+    }
+    .pdf-modal-close:hover { background: var(--surface-hover); color: var(--text); }
+    .pdf-modal-body { flex: 1; overflow: hidden; }
+    .pdf-modal-body iframe {
+      width: 100%; height: 100%; border: none; display: block;
+    }
+
     /* ── Log Modal ── */
     .modal-overlay {
       display: none; position: fixed; inset: 0; z-index: 200;
@@ -308,6 +345,18 @@
     </div>
     <div class="modal-body" id="logModalBody">
       <div class="log-empty">Lade…</div>
+    </div>
+  </div>
+</div>
+
+<div id="pdfModal" class="pdf-overlay">
+  <div class="pdf-modal" id="pdfModalBox">
+    <div class="pdf-modal-head">
+      <span class="pdf-modal-title" id="pdfModalTitle"></span>
+      <button class="pdf-modal-close" id="pdfModalClose">✕</button>
+    </div>
+    <div class="pdf-modal-body">
+      <iframe id="pdfModalFrame" src="" title="PDF Vorschau"></iframe>
     </div>
   </div>
 </div>
@@ -390,6 +439,32 @@ async function changeKat(id, newKat) {
   const u = await r.json();
   set({ docs: S.docs.map(d => d.id === id ? u : d) });
 }
+
+// ── PDF Preview Modal ─────────────────────────────────────────────────────────
+function openPreview(id, name) {
+  const overlay = document.getElementById('pdfModal');
+  document.getElementById('pdfModalTitle').textContent = name;
+  document.getElementById('pdfModalFrame').src = '/api/preview/' + id;
+  overlay.classList.add('open');
+  requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add('visible')));
+}
+
+function closePreview() {
+  const overlay = document.getElementById('pdfModal');
+  overlay.classList.remove('visible');
+  setTimeout(() => {
+    overlay.classList.remove('open');
+    document.getElementById('pdfModalFrame').src = '';
+  }, 200);
+}
+
+document.getElementById('pdfModalClose').addEventListener('click', closePreview);
+document.getElementById('pdfModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('pdfModal')) closePreview();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('pdfModal').classList.contains('open')) closePreview();
+});
 
 // ── Log Modal ─────────────────────────────────────────────────────────────────
 async function openLogModal() {
@@ -578,9 +653,25 @@ function render() {
           h('span', { cls:'folder-card-name', style:{ color:info.color } }, kat),
           h('span', { cls:'folder-card-count' }, kd.length)
         ),
-        ...kd.map(d => h('a', { cls:'folder-file', href:'/api/download/'+d.id },
+        ...kd.map(d => h('div', { cls:'folder-file' },
           h('span', {}, info.emoji),
-          h('span', { cls:'folder-file-name' }, d.name)
+          h('span', { cls:'folder-file-name' }, d.name),
+          h('button', {
+            title:'Vorschau',
+            style:{ background:'transparent', border:'none', cursor:'pointer', color:'var(--muted)', padding:'2px 4px', borderRadius:'4px', display:'flex', alignItems:'center', transition:'color .12s' },
+            onClick: e => { e.stopPropagation(); openPreview(d.id, d.name); },
+            onMouseover: e => e.currentTarget.style.color = 'var(--text)',
+            onMouseout:  e => e.currentTarget.style.color = 'var(--muted)',
+          },
+            h('svg', { width:'13', height:'13', viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', 'stroke-width':'2', 'stroke-linecap':'round', 'stroke-linejoin':'round' },
+              h('ellipse', { cx:'12', cy:'12', rx:'10', ry:'6' }),
+              h('circle', { cx:'12', cy:'12', r:'3' })
+            )
+          ),
+          h('a', { href:'/api/download/'+d.id, title:'Download', style:{ color:'var(--muted)', textDecoration:'none', padding:'2px 4px', borderRadius:'4px', fontSize:'13px', transition:'color .12s' },
+            onMouseover: e => e.currentTarget.style.color = 'var(--text)',
+            onMouseout:  e => e.currentTarget.style.color = 'var(--muted)',
+          }, '↓')
         ))
       ));
     }
@@ -624,7 +715,15 @@ function render() {
         h('div', { cls:'col-text' }, doc.datum || '—'),
         doc.betrag ? h('div', { cls:'col-amount' }, doc.betrag) : h('div', { cls:'col-text' }, '—'),
         doc.pages  ? h('div', { cls:'col-pages' }, doc.pages + ' S.') : h('div', { cls:'col-text' }, '—'),
-        h('div', { cls:'col-dl' }, katSel, h('a', { cls:'dl-link', href:'/api/download/'+doc.id, title:'Download' }, '↓'))
+        h('div', { cls:'col-dl' }, katSel,
+          h('button', { cls:'dl-link', title:'Vorschau', onClick:()=>openPreview(doc.id, doc.name) },
+            h('svg', { width:'14', height:'14', viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', 'stroke-width':'2', 'stroke-linecap':'round', 'stroke-linejoin':'round' },
+              h('ellipse', { cx:'12', cy:'12', rx:'10', ry:'6' }),
+              h('circle', { cx:'12', cy:'12', r:'3' })
+            )
+          ),
+          h('a', { cls:'dl-link', href:'/api/download/'+doc.id, title:'Download' }, '↓')
+        )
       );
     });
     contentEl = h('div', { cls:'doc-list' }, head, ...rows);
