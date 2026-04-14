@@ -515,8 +515,12 @@ function getCounts() { const c = { Alle: S.docs.length }; for (const d of S.docs
 function fmt(b) { if (b < 1024) return b+' B'; if (b < 1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SVG_TAGS = new Set(['svg','circle','ellipse','path','rect','line','polyline','polygon','g','defs','use','symbol','text','tspan']);
 function h(tag, attrs, ...kids) {
-  const el = document.createElement(tag);
+  const el = SVG_TAGS.has(tag)
+    ? document.createElementNS(SVG_NS, tag)
+    : document.createElement(tag);
   for (const [k,v] of Object.entries(attrs||{})) {
     if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
     else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), v);
