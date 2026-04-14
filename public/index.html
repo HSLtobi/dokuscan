@@ -158,13 +158,13 @@
     /* Doc list */
     .doc-list { flex: 1; overflow-y: auto; padding: 0; }
     .list-head {
-      display: grid; grid-template-columns: 40px 1fr 160px 100px 100px 80px 100px;
+      display: grid; grid-template-columns: 40px 1fr 160px 100px 100px 110px 110px;
       gap: 12px; padding: 8px 20px; font-size: 10px; color: var(--muted);
       letter-spacing: 1px; text-transform: uppercase; position: sticky; top: 0;
       background: rgba(5,5,10,.95); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); z-index: 2;
     }
     .doc-row {
-      display: grid; grid-template-columns: 40px 1fr 160px 100px 100px 80px 100px;
+      display: grid; grid-template-columns: 40px 1fr 160px 100px 100px 110px 110px;
       gap: 12px; padding: 10px 20px; align-items: center;
       border-bottom: 1px solid var(--border); transition: background .1s; cursor: default;
     }
@@ -182,6 +182,11 @@
     .col-text { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .col-amount { font-size: 12px; font-weight: 500; color: var(--amber); }
     .col-pages { font-size: 11px; color: var(--muted); }
+    .col-time  { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .doc-pages-badge { margin-left: 6px; font-size: 10px; color: var(--muted); background: rgba(255,255,255,.06); border-radius: 4px; padding: 1px 5px; }
+    .sort-col { cursor: pointer; user-select: none; transition: color .12s; }
+    .sort-col:hover { color: var(--text); }
+    .sort-active { color: var(--text) !important; }
     .col-dl { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
     .dl-link {
       width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
@@ -382,6 +387,7 @@ let S = {
   kat: 'Alle', view: 'liste', q: '', year: '', editing: null,
   loading: true,
   queueLength: 0, currentFile: null, errorCount: 0, processedToday: 0,
+  sortField: 'processedAt', sortDir: 'desc',
 };
 function set(p) { Object.assign(S, p); render(); }
 
@@ -520,7 +526,7 @@ document.getElementById('logModal').addEventListener('click', e => {
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 function vis() {
-  return S.docs.filter(d => {
+  const filtered = S.docs.filter(d => {
     if (S.kat !== 'Alle' && d.kategorie !== S.kat) return false;
     if (S.year && (!d.datum || !d.datum.startsWith(S.year))) return false;
     if (S.q.trim()) {
@@ -529,6 +535,29 @@ function vis() {
     }
     return true;
   });
+
+  const { sortField: f, sortDir: dir } = S;
+  filtered.sort((a, b) => {
+    let va = a[f] || '', vb = b[f] || '';
+    if (f === 'betrag') {
+      va = parseFloat((va+'').replace(/[^\d.,]/g,'').replace(',','.')) || 0;
+      vb = parseFloat((vb+'').replace(/[^\d.,]/g,'').replace(',','.')) || 0;
+      return dir === 'asc' ? va - vb : vb - va;
+    }
+    const cmp = va.toString().localeCompare(vb.toString(), 'de', { numeric: true });
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  return filtered;
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return time;
+  return d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit' }) + ' ' + time;
 }
 function getYears() { return [...new Set(S.docs.map(d => d.datum?.slice(0,4)).filter(Boolean))].sort((a,b) => b-a); }
 function getCounts() { const c = { Alle: S.docs.length }; for (const d of S.docs) c[d.kategorie] = (c[d.kategorie]||0) + 1; return c; }
@@ -696,9 +725,22 @@ function render() {
     }
     contentEl = h('div', { cls:'doc-list' }, grid);
   } else if (docs.length) {
+    function sortCol(field, label) {
+      const active = S.sortField === field;
+      const arrow  = active ? (S.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+      return h('span', {
+        cls: 'sort-col' + (active ? ' sort-active' : ''),
+        onClick: () => set({ sortField: field, sortDir: active && S.sortDir === 'asc' ? 'desc' : 'asc' })
+      }, label + arrow);
+    }
     const head = h('div', { cls:'list-head' },
-      h('span', {}), h('span', {}, 'Dateiname'), h('span', {}, 'Absender'),
-      h('span', {}, 'Datum'), h('span', {}, 'Betrag'), h('span', {}, 'Seiten'), h('span', {})
+      h('span', {}),
+      sortCol('name',        'Dateiname'),
+      sortCol('absender',    'Absender'),
+      sortCol('datum',       'Datum'),
+      sortCol('betrag',      'Betrag'),
+      sortCol('processedAt', 'Gescannt'),
+      h('span', {})
     );
     const rows = docs.map(doc => {
       const info = CATS[doc.kategorie] || CATS.Sonstiges;
@@ -717,9 +759,10 @@ function render() {
       } else {
         nameEl = h('div', { style:{ minWidth:0 } },
           h('div', { cls:'doc-name-text', onClick:()=>set({editing:doc.id}), title:'Klicken zum Umbenennen' }, doc.name),
-          doc.zusammenfassung
-            ? h('div', { cls:'doc-sub' }, doc.zusammenfassung)
-            : h('div', { cls:'doc-sub' }, fmt(doc.size))
+          h('div', { cls:'doc-sub' },
+            doc.zusammenfassung || fmt(doc.size),
+            doc.pages ? h('span', { cls:'doc-pages-badge' }, doc.pages + ' S.') : null
+          )
         );
       }
 
@@ -733,7 +776,7 @@ function render() {
         h('div', { cls:'col-text' }, doc.absender || '—'),
         h('div', { cls:'col-text' }, doc.datum || '—'),
         doc.betrag ? h('div', { cls:'col-amount' }, doc.betrag) : h('div', { cls:'col-text' }, '—'),
-        doc.pages  ? h('div', { cls:'col-pages' }, doc.pages + ' S.') : h('div', { cls:'col-text' }, '—'),
+        h('div', { cls:'col-text col-time' }, fmtTime(doc.processedAt)),
         h('div', { cls:'col-dl' }, katSel,
           h('button', { cls:'dl-link', title:'Vorschau', onClick:()=>openPreview(doc.id, doc.name) }, '👁'),
           (doc.kategorie === 'Sonstiges' || doc.kategorie === 'Pruefen')

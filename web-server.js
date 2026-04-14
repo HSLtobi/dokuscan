@@ -58,6 +58,7 @@ function docFromFile(kat, file) {
     betrag:         meta.betrag          || null,
     zusammenfassung:meta.zusammenfassung || null,
     pages:          meta.pages           || null,
+    processedAt:    meta.processedAt     || stat.mtime.toISOString(),
     size:           stat.size,
     modified:       stat.mtime.toISOString(),
     path:           path.join(kat, file)
