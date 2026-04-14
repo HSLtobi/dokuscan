@@ -13,7 +13,7 @@ require('dotenv').config();
 const client  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const EINGANG = process.env.SCAN_EINGANG || '/home/pi/Scanner/Eingang';
 const ARCHIV  = process.env.SCAN_ARCHIV  || '/home/pi/Scanner/Archiv';
-const KATEGORIEN = ['Rechnung','Vertrag','Kontoauszug','Versicherung','Brief','Steuer','Behoerde','Medizin','Sonstiges'];
+const KATEGORIEN = ['Rechnung','Vertrag','Kontoauszug','Versicherung','Brief','Steuer','Behoerde','Medizin','Sonstiges','Pruefen'];
 
 const LOG_DIR    = path.join(__dirname, 'logs');
 const ERROR_LOG  = path.join(LOG_DIR, 'error.log');
@@ -97,8 +97,13 @@ function getPageCount(filePath) {
 function getPageText(filePath, page) {
   try {
     return execSync(`pdftotext -f ${page} -l ${page} "${filePath}" -`, { encoding: 'utf8' })
-      .replace(/\s+/g, ' ').trim().substring(0, 600);
+      .replace(/\s+/g, ' ').trim().substring(0, 1500);
   } catch { return ''; }
+}
+
+// ── Seiten-Fortsetzungssignal erkennen ────────────────────────────────────────
+function hasContinuationSignal(text) {
+  return /seite\s+\d+\s+(von|of)\s+\d+|page\s+\d+\s+(of|von)\s+\d+|\d+\s*\/\s*\d+\s*seite|fortsetzung|continued|weiter auf|übertrag/i.test(text);
 }
 
 // ── Seite als JPEG rendern (für Seiten ohne lesbaren Text) ───────────────────
@@ -134,21 +139,24 @@ async function detectBoundaries(filePath, pageCount) {
   const pages = [];
   for (let i = 1; i <= pageCount; i++) {
     const text = getPageText(filePath, i);
-    pages.push({ page: i, text, hasText: text.length > 0 });
+    pages.push({ page: i, text, hasText: text.length > 0, continuation: hasContinuationSignal(text) });
   }
 
-  const totalTextLen = pages.reduce((s,p) => s + p.text.length, 0);
-  const useImages    = totalTextLen < 50; // Kein extrahierbarer Text → Bildanalyse
+  const totalTextLen = pages.reduce((s, p) => s + p.text.length, 0);
+  const useImages    = totalTextLen < 50;
+
+  // Vorfilter: Seiten mit Fortsetzungssignal können kein Dokumentstart sein
+  const forcedContinuation = new Set(
+    pages.filter(p => p.continuation).map(p => p.page)
+  );
 
   let content;
 
   if (useImages) {
-    console.log(`[DokuScan] 📷 Kein extrahierbarer Text – verwende Bildanalyse für Grenzerkennung`);
+    console.log(`[DokuScan] 📷 Kein extrahierbarer Text – verwende Bildanalyse`);
     content = [];
     const MAX_IMGS = 20;
-    const pagesToSend = pages.slice(0, MAX_IMGS);
-
-    for (const p of pagesToSend) {
+    for (const p of pages.slice(0, MAX_IMGS)) {
       const b64 = renderPageAsBase64(filePath, p.page);
       if (b64) {
         content.push({ type: 'text', text: `--- Seite ${p.page} ---` });
@@ -158,38 +166,65 @@ async function detectBoundaries(filePath, pageCount) {
       }
     }
     if (pageCount > MAX_IMGS) {
-      content.push({ type: 'text', text: `(Seiten ${MAX_IMGS+1}–${pageCount} nicht dargestellt, bitte schätzen)` });
+      content.push({ type: 'text', text: `(Seiten ${MAX_IMGS + 1}–${pageCount} nicht dargestellt)` });
     }
     content.push({ type: 'text', text:
-      `Das ist ein Scan-Stapel mit ${pageCount} Seiten und ${pageCount > MAX_IMGS ? 'mindestens ' : ''}mehreren verschiedenen Dokumenten.\n` +
-      `Erkenne wo jedes neue Dokument beginnt.\n` +
-      `Antworte NUR mit JSON: {"boundaries":[1,3,5,...]} – Seitenzahlen wo ein neues Dokument anfängt. Seite 1 ist immer dabei.`
+      `Das ist ein eingescannter Dokumentenstapel mit ${pageCount} Seiten.\n\n` +
+      `AUFGABE: Erkenne die Grenzen zwischen verschiedenen Dokumenten.\n\n` +
+      `WICHTIGE REGELN – lies diese sorgfältig:\n` +
+      `1. Ein mehrseitiges Dokument (Brief, Vertrag, Kontoauszug, Rechnung über mehrere Seiten) gehört ZUSAMMEN – trenne es NICHT.\n` +
+      `2. Neue Dokument-Grenze NUR wenn: anderer Absender/Briefkopf, komplett anderes Thema, anderes Datum UND anderer Absender.\n` +
+      `3. Folgeseiten (gleicher Briefkopf, "Seite 2 von 3", gleiche Rechnungsnummer) → KEIN neues Dokument.\n` +
+      `4. Im Zweifel: Seiten ZUSAMMENLASSEN statt trennen.\n` +
+      `5. Leere Trennseiten zwischen Dokumenten → ignorieren (zählen zum vorherigen Dokument).\n\n` +
+      `Antworte NUR mit validem JSON: {"boundaries":[1,...]} – Seitenzahlen wo ein NEUES Dokument beginnt. Seite 1 immer enthalten.`
     });
   } else {
-    const pagesSummary = pages.map(p =>
-      `=== Seite ${p.page} ===\n${p.text || '(leer)'}`
-    ).join('\n\n');
+    const pagesSummary = pages.map(p => {
+      const cont = p.continuation ? ' [FORTSETZUNG – kein neues Dokument]' : '';
+      return `=== Seite ${p.page}${cont} ===\n${p.text || '(leer/kein Text)'}`;
+    }).join('\n\n');
 
-    content = `Du analysierst einen Scan-Stapel mit ${pageCount} Seiten, der mehrere verschiedene Dokumente enthält.\n\n` +
-      `Erkenne anhand von Wechseln in Absender, Briefkopf, Datum, Dokumenttyp und Formatierung wo neue Dokumente beginnen.\n\n` +
-      `${pagesSummary}\n\n` +
-      `Antworte NUR mit validem JSON: {"boundaries":[1,3,5,...]} – Seitenzahlen wo ein neues Dokument anfängt. Seite 1 ist immer dabei.`;
+    content =
+      `Du analysierst einen eingescannten Dokumentenstapel mit ${pageCount} Seiten.\n\n` +
+      `AUFGABE: Erkenne die Grenzen zwischen verschiedenen Dokumenten.\n\n` +
+      `WICHTIGE REGELN – lies diese sorgfältig:\n` +
+      `1. Ein mehrseitiges Dokument (Brief, Vertrag, Kontoauszug, Rechnung über mehrere Seiten) gehört ZUSAMMEN – trenne es NICHT.\n` +
+      `2. Neue Dokumentgrenze NUR bei: eindeutigem Wechsel von Absender UND Thema. Eines allein reicht nicht.\n` +
+      `3. Folgeseiten erkennst du an: gleicher Rechnungs-/Vertragsnummer, "Seite X von Y", gleicher Anschrift, inhaltlicher Fortsetzung, Übertrag-Zeilen.\n` +
+      `4. Anhänge (AGB, Produktblätter) die direkt zu einem Dokument gehören → NICHT trennen.\n` +
+      `5. Im Zweifel: Seiten ZUSAMMENLASSEN. Lieber 1 Dokument zu viel als ein Dokument zerrissen.\n` +
+      `6. Bereits markierte FORTSETZUNGS-Seiten sind definitiv kein neuer Dokumentstart.\n\n` +
+      `SEITENINHALT:\n${pagesSummary}\n\n` +
+      `Antworte NUR mit validem JSON: {"boundaries":[1,...]} – Seitenzahlen wo ein NEUES Dokument beginnt. Seite 1 immer enthalten.`;
   }
 
-  const response = await client.messages.create({
+  const response = await withRetry(() => client.messages.create({
     model:      'claude-opus-4-6',
-    max_tokens: 512,
+    max_tokens: 1024,
     messages:   [{ role: 'user', content }]
-  });
-
-  const raw        = response.content[0].text.match(/\{[\s\S]*\}/)[0];
-  const result     = JSON.parse(raw);
-  const boundaries = [...new Set([1, ...result.boundaries])].filter(n => n >= 1 && n <= pageCount).sort((a,b) => a-b);
-
-  return boundaries.map((start, i) => ({
-    start,
-    end: i < boundaries.length - 1 ? boundaries[i+1] - 1 : pageCount
   }));
+
+  const raw    = response.content[0].text.match(/\{[\s\S]*\}/)[0];
+  const result = JSON.parse(raw);
+
+  // Seiten mit Fortsetzungssignal können kein Dokumentstart sein
+  const rawBoundaries = [...new Set([1, ...result.boundaries])]
+    .filter(n => n >= 1 && n <= pageCount && !forcedContinuation.has(n))
+    .sort((a, b) => a - b);
+
+  // Plausibilitätsprüfung: mehr als die Hälfte 1-seitige Docs bei >6 Seiten → verdächtig
+  const ranges = rawBoundaries.map((start, i) => ({
+    start,
+    end: i < rawBoundaries.length - 1 ? rawBoundaries[i + 1] - 1 : pageCount
+  }));
+  const singlePageCount = ranges.filter(r => r.end - r.start === 0).length;
+  if (pageCount > 6 && singlePageCount > ranges.length * 0.6) {
+    console.warn(`[DokuScan] ⚠️  Zu viele Einzelseiten-Dokumente (${singlePageCount}/${ranges.length}) – sende zur manuellen Prüfung`);
+    return [{ start: 1, end: pageCount, suspicious: true }];
+  }
+
+  return ranges;
 }
 
 // ── PDF in Teilstücke aufteilen ───────────────────────────────────────────────
@@ -312,6 +347,24 @@ async function processFile(filePath) {
       if (pageCount > 1) {
         const ranges = await detectBoundaries(filePath, pageCount);
         console.log(`[DokuScan] 📂 ${ranges.length} Dokument(e) erkannt: ${ranges.map(r => `S.${r.start}-${r.end}`).join(', ')}`);
+
+        // Verdächtiger Stack → in Pruefen-Ordner zur manuellen Sichtung
+        if (ranges.length === 1 && ranges[0].suspicious) {
+          const pruefen = path.join(ARCHIV, 'Pruefen');
+          fs.mkdirSync(pruefen, { recursive: true });
+          const dest = path.join(pruefen, origName);
+          fs.copyFileSync(filePath, dest);
+          fs.unlinkSync(filePath);
+          fs.writeFileSync(dest + '.meta.json', JSON.stringify({
+            originalName: origName, kategorie: 'Pruefen', pages: pageCount,
+            hinweis: 'Automatische Trennung unsicher – bitte manuell prüfen',
+            processedAt: new Date().toISOString()
+          }, null, 2));
+          console.log(`[DokuScan] 🔎 → Pruefen/${origName} (manuelle Prüfung nötig)`);
+          statusState.processedToday++;
+          saveStatus();
+          return;
+        }
 
         if (ranges.length > 1) {
           const parts = await splitPDF(filePath, ranges);

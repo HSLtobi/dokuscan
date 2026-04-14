@@ -168,7 +168,7 @@ app.patch('/api/rename/:id', (req, res) => {
 app.patch('/api/kategorize/:id', (req, res) => {
   try {
     const { newKat } = req.body;
-    const validKats  = ['Rechnung','Vertrag','Kontoauszug','Versicherung','Brief','Steuer','Behoerde','Medizin','Sonstiges'];
+    const validKats  = ['Rechnung','Vertrag','Kontoauszug','Versicherung','Brief','Steuer','Behoerde','Medizin','Sonstiges','Pruefen'];
     if (!validKats.includes(newKat)) return res.status(400).json({ error: 'Ungültige Kategorie' });
 
     const rel     = Buffer.from(req.params.id, 'base64').toString();
