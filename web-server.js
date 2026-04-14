@@ -108,11 +108,27 @@ app.get('/api/preview/:id', (req, res) => {
     const rel  = Buffer.from(req.params.id, 'base64').toString();
     const full = safeAbs(rel);
     if (!fs.existsSync(full)) return res.status(404).send('Nicht gefunden');
+    const stat = fs.statSync(full);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Content-Length', stat.size);
     res.setHeader('Cache-Control', 'private, max-age=3600');
     fs.createReadStream(full).pipe(res);
   } catch { res.status(400).send('Ungültige ID'); }
+});
+
+// ── API: Dokument neu analysieren ─────────────────────────────────────────────
+app.post('/api/reanalyze/:id', async (req, res) => {
+  try {
+    const rel  = Buffer.from(req.params.id, 'base64').toString();
+    const full = safeAbs(rel);
+    if (!fs.existsSync(full)) return res.status(404).json({ error: 'Nicht gefunden' });
+    const { reanalyzeDocument } = require('./server');
+    const result = await reanalyzeDocument(full);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── API: ZIP-Export ───────────────────────────────────────────────────────────

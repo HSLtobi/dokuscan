@@ -441,6 +441,26 @@ async function changeKat(id, newKat) {
 }
 
 // ── PDF Preview Modal ─────────────────────────────────────────────────────────
+async function reanalyzeDoc(id, name) {
+  if (!confirm(`"${name}" neu analysieren? Die KI liest das Dokument erneut.`)) return;
+  const btn = document.querySelector(`button[data-reanalyze="${id}"]`);
+  if (btn) btn.textContent = '⏳';
+  try {
+    const r = await fetch('/api/reanalyze/' + id, { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) {
+      if (btn) btn.textContent = '✅';
+      setTimeout(() => { loadDocs(); }, 800);
+    } else {
+      if (btn) btn.textContent = '❌';
+      alert('Fehler: ' + (data.error || 'Unbekannt'));
+    }
+  } catch (e) {
+    if (btn) btn.textContent = '❌';
+    alert('Netzwerkfehler: ' + e.message);
+  }
+}
+
 function openPreview(id, name) {
   const overlay = document.getElementById('pdfModal');
   document.getElementById('pdfModalTitle').textContent = name;
@@ -716,6 +736,9 @@ function render() {
         doc.pages  ? h('div', { cls:'col-pages' }, doc.pages + ' S.') : h('div', { cls:'col-text' }, '—'),
         h('div', { cls:'col-dl' }, katSel,
           h('button', { cls:'dl-link', title:'Vorschau', onClick:()=>openPreview(doc.id, doc.name) }, '👁'),
+          (doc.kategorie === 'Sonstiges' || doc.kategorie === 'Pruefen')
+            ? h('button', { cls:'dl-link', title:'Neu analysieren', 'data-reanalyze':doc.id, onClick:()=>reanalyzeDoc(doc.id, doc.name) }, '🔄')
+            : null,
           h('a', { cls:'dl-link', href:'/api/download/'+doc.id, title:'Download' }, '↓')
         )
       );

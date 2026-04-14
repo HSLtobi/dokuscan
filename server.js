@@ -84,6 +84,25 @@ function safePath(base, ...segments) {
   return resolved;
 }
 
+// ── Korrupte PDF reparieren (ghostscript) ────────────────────────────────────
+function repairPDF(filePath) {
+  const repaired = filePath.replace(/\.pdf$/i, '_repaired.pdf');
+  try {
+    const result = spawnSync('gs', [
+      '-dBATCH', '-dNOPAUSE', '-dSAFER', '-sDEVICE=pdfwrite',
+      `-sOutputFile=${repaired}`, filePath
+    ], { timeout: 30000 });
+    if (result.status === 0 && fs.existsSync(repaired) && fs.statSync(repaired).size > 100) {
+      fs.copyFileSync(repaired, filePath);
+      fs.unlinkSync(repaired);
+      console.log(`[DokuScan] 🔧 PDF repariert: ${path.basename(filePath)}`);
+      return true;
+    }
+  } catch {}
+  try { fs.unlinkSync(repaired); } catch {}
+  return false;
+}
+
 // ── Seitenanzahl ermitteln ────────────────────────────────────────────────────
 function getPageCount(filePath) {
   try {
@@ -106,11 +125,11 @@ function hasContinuationSignal(text) {
   return /seite\s+\d+\s+(von|of)\s+\d+|page\s+\d+\s+(of|von)\s+\d+|\d+\s*\/\s*\d+\s*seite|fortsetzung|continued|weiter auf|übertrag/i.test(text);
 }
 
-// ── Seite als JPEG rendern (für Seiten ohne lesbaren Text) ───────────────────
+// ── Seite als JPEG rendern + enhancen ────────────────────────────────────────
 function renderPageAsBase64(filePath, page) {
   try {
     const tmp = path.join(os.tmpdir(), `ds_p${page}_${Date.now()}`);
-    spawnSync('pdftoppm', ['-jpeg', '-r', '200', '-f', String(page), '-l', String(page), filePath, tmp]);
+    spawnSync('pdftoppm', ['-jpeg', '-r', '250', '-f', String(page), '-l', String(page), filePath, tmp]);
 
     const dir     = path.dirname(tmp);
     const prefix  = path.basename(tmp) + '-';
@@ -119,8 +138,17 @@ function renderPageAsBase64(filePath, page) {
 
     let imgPath = path.join(dir, matches[0]);
 
+    // Starke Aufwertung: Normalisierung + Kontrast + Schärfen + Pegelkorrektur
     const enhanced = imgPath.replace('.jpg', '_enh.jpg');
-    const magick   = spawnSync('convert', [imgPath, '-normalize', '-contrast', '-contrast', enhanced]);
+    const magick = spawnSync('convert', [
+      imgPath,
+      '-normalize',
+      '-auto-level',
+      '-contrast', '-contrast',
+      '-sharpen', '0x1.5',
+      '-level', '5%,90%',
+      enhanced
+    ]);
     if (magick.status === 0 && fs.existsSync(enhanced)) {
       fs.unlinkSync(imgPath);
       imgPath = enhanced;
@@ -130,6 +158,55 @@ function renderPageAsBase64(filePath, page) {
     fs.unlinkSync(imgPath);
     return data;
   } catch { return null; }
+}
+
+// ── Gespiegelten Scan erkennen und korrigieren ────────────────────────────────
+function fixMirroredScan(filePath) {
+  try {
+    const tmp   = path.join(os.tmpdir(), `ds_mirror_${Date.now()}`);
+    spawnSync('pdftoppm', ['-jpeg', '-r', '150', '-f', '1', '-l', '1', filePath, tmp]);
+    const dir   = path.dirname(tmp);
+    const match = fs.readdirSync(dir).find(f => f.startsWith(path.basename(tmp) + '-') && f.endsWith('.jpg'));
+    if (!match) return false;
+
+    const imgPath = path.join(dir, match);
+
+    // Probiere OCR – wenn normales Bild keinen Text liefert, versuche gespiegelt
+    const ocrNormal = spawnSync('tesseract', [imgPath, 'stdout', '-l', 'deu+eng', '--psm', '3'], { encoding: 'utf8' });
+    const wordsNormal = (ocrNormal.stdout || '').trim().split(/\s+/).filter(w => w.length > 3).length;
+
+    if (wordsNormal < 5) {
+      // Bild horizontal spiegeln und nochmal OCR
+      const flipped = imgPath.replace('.jpg', '_flop.jpg');
+      spawnSync('convert', [imgPath, '-flop', flipped]);
+      const ocrFlipped = spawnSync('tesseract', [flipped, 'stdout', '-l', 'deu+eng', '--psm', '3'], { encoding: 'utf8' });
+      const wordsFlipped = (ocrFlipped.stdout || '').trim().split(/\s+/).filter(w => w.length > 3).length;
+
+      try { fs.unlinkSync(flipped); } catch {}
+
+      if (wordsFlipped > wordsNormal + 3) {
+        // Gespiegelt → Seiten in PDF horizontal spiegeln
+        const fixed = filePath.replace(/\.pdf$/i, '_fixed.pdf');
+        const gs = spawnSync('gs', [
+          '-dBATCH', '-dNOPAUSE', '-dSAFER',
+          '-sDEVICE=pdfwrite',
+          `-sOutputFile=${fixed}`,
+          '-c', '<</BeginPage { pop 1 0 translate -1 1 scale } >> setpagedevice',
+          '-f', filePath
+        ], { timeout: 30000 });
+        if (gs.status === 0 && fs.existsSync(fixed) && fs.statSync(fixed).size > 100) {
+          fs.copyFileSync(fixed, filePath);
+          fs.unlinkSync(fixed);
+          console.log(`[DokuScan] 🔄 Gespiegelter Scan korrigiert: ${path.basename(filePath)}`);
+          try { fs.unlinkSync(imgPath); } catch {}
+          return true;
+        }
+        try { fs.unlinkSync(fixed); } catch {}
+      }
+    }
+    try { fs.unlinkSync(imgPath); } catch {}
+    return false;
+  } catch { return false; }
 }
 
 // ── KI erkennt Dokumentgrenzen ────────────────────────────────────────────────
@@ -341,6 +418,17 @@ async function processFile(filePath) {
 
   try {
     if (ext === '.pdf') {
+      // PDF-Integrität prüfen – bei xref-Fehler Reparatur versuchen
+      const pdfInfo = spawnSync('pdfinfo', [filePath], { encoding: 'utf8' });
+      if (pdfInfo.stderr && /xref|trailer/i.test(pdfInfo.stderr)) {
+        console.log(`[DokuScan] 🔧 Korrupte PDF – versuche Reparatur…`);
+        repairPDF(filePath);
+      }
+
+      // Gespiegelten Scan automatisch korrigieren (nur wenn tesseract verfügbar)
+      const tesseractCheck = spawnSync('which', ['tesseract']);
+      if (tesseractCheck.status === 0) fixMirroredScan(filePath);
+
       const pageCount = getPageCount(filePath);
       console.log(`[DokuScan] 📑 Seiten: ${pageCount}`);
 
@@ -444,6 +532,33 @@ function enqueue(filePath) {
   console.log(`[DokuScan] 📥 Eingereiht: ${path.basename(filePath)} (Queue: ${queue.length})`);
   runQueue();
 }
+
+// ── Re-Analyse eines bereits archivierten Dokuments ──────────────────────────
+async function reanalyzeDocument(fullPath) {
+  const analysis  = await analyzeDocument(fullPath);
+  const meta      = (() => { try { return JSON.parse(fs.readFileSync(fullPath + '.meta.json', 'utf8')); } catch { return {}; } })();
+  const kategorie = KATEGORIEN.includes(analysis.kategorie) ? analysis.kategorie : 'Sonstiges';
+
+  // Meta aktualisieren
+  const newMeta = { ...meta, ...analysis, kategorie, reanalyzedAt: new Date().toISOString() };
+  fs.writeFileSync(fullPath + '.meta.json', JSON.stringify(newMeta, null, 2));
+
+  // Wenn die Kategorie sich geändert hat → Datei verschieben
+  const oldKat = meta.kategorie;
+  if (oldKat && oldKat !== kategorie) {
+    const newDir  = path.join(ARCHIV, kategorie);
+    fs.mkdirSync(newDir, { recursive: true });
+    const newPath = path.join(newDir, path.basename(fullPath));
+    fs.copyFileSync(fullPath, newPath);
+    fs.unlinkSync(fullPath);
+    fs.writeFileSync(newPath + '.meta.json', JSON.stringify(newMeta, null, 2));
+    try { fs.unlinkSync(fullPath + '.meta.json'); } catch {}
+    return { moved: true, newPath, kategorie };
+  }
+  return { moved: false, kategorie };
+}
+
+module.exports = { reanalyzeDocument, analyzeDocument, ARCHIV, KATEGORIEN, withRetry };
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 fs.mkdirSync(EINGANG, { recursive: true });
