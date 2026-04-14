@@ -662,16 +662,11 @@ function render() {
           h('span', { cls:'folder-file-name' }, d.name),
           h('button', {
             title:'Vorschau',
-            style:{ background:'transparent', border:'none', cursor:'pointer', color:'var(--muted)', padding:'2px 4px', borderRadius:'4px', display:'flex', alignItems:'center', transition:'color .12s' },
+            style:{ background:'transparent', border:'none', cursor:'pointer', color:'var(--muted)', padding:'2px 4px', borderRadius:'4px', fontSize:'13px', transition:'color .12s' },
             onClick: e => { e.stopPropagation(); openPreview(d.id, d.name); },
             onMouseover: e => e.currentTarget.style.color = 'var(--text)',
             onMouseout:  e => e.currentTarget.style.color = 'var(--muted)',
-          },
-            h('svg', { width:'13', height:'13', viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', 'stroke-width':'2', 'stroke-linecap':'round', 'stroke-linejoin':'round' },
-              h('ellipse', { cx:'12', cy:'12', rx:'10', ry:'6' }),
-              h('circle', { cx:'12', cy:'12', r:'3' })
-            )
-          ),
+          }, '👁'),
           h('a', { href:'/api/download/'+d.id, title:'Download', style:{ color:'var(--muted)', textDecoration:'none', padding:'2px 4px', borderRadius:'4px', fontSize:'13px', transition:'color .12s' },
             onMouseover: e => e.currentTarget.style.color = 'var(--text)',
             onMouseout:  e => e.currentTarget.style.color = 'var(--muted)',
@@ -720,12 +715,7 @@ function render() {
         doc.betrag ? h('div', { cls:'col-amount' }, doc.betrag) : h('div', { cls:'col-text' }, '—'),
         doc.pages  ? h('div', { cls:'col-pages' }, doc.pages + ' S.') : h('div', { cls:'col-text' }, '—'),
         h('div', { cls:'col-dl' }, katSel,
-          h('button', { cls:'dl-link', title:'Vorschau', onClick:()=>openPreview(doc.id, doc.name) },
-            h('svg', { width:'14', height:'14', viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', 'stroke-width':'2', 'stroke-linecap':'round', 'stroke-linejoin':'round' },
-              h('ellipse', { cx:'12', cy:'12', rx:'10', ry:'6' }),
-              h('circle', { cx:'12', cy:'12', r:'3' })
-            )
-          ),
+          h('button', { cls:'dl-link', title:'Vorschau', onClick:()=>openPreview(doc.id, doc.name) }, '👁'),
           h('a', { cls:'dl-link', href:'/api/download/'+doc.id, title:'Download' }, '↓')
         )
       );
