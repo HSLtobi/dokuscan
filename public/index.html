@@ -30,7 +30,7 @@
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 2px; }
 
     /* ── Layout ── */
-    .shell { display: grid; grid-template-rows: 56px 1px auto 1fr; height: 100vh; }
+    .shell { display: grid; grid-template-rows: 56px 1px auto auto 1fr; height: 100vh; }
     .content { display: grid; grid-template-columns: 220px 1px 1fr; flex: 1; overflow: hidden; height: 100%; }
     .divider { background: var(--border); }
 
@@ -69,6 +69,24 @@
     .btn-accent:hover { filter: brightness(1.1); }
     .btn-zip { background: rgba(245,158,11,.1); color: var(--amber); border: 1px solid rgba(245,158,11,.2); }
     .btn-zip:hover { background: rgba(245,158,11,.2); }
+    .btn-log { background: rgba(239,68,68,.08); color: var(--red); border: 1px solid rgba(239,68,68,.2); }
+    .btn-log:hover { background: rgba(239,68,68,.15); }
+
+    /* ── Queue-Banner ── */
+    .queue-banner {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 24px; font-size: 12px;
+      background: linear-gradient(90deg, rgba(34,197,94,.1), rgba(34,197,94,.04));
+      border-bottom: 1px solid rgba(34,197,94,.15);
+    }
+    .queue-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: qpulse 1.4s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes qpulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.7)} }
+    .queue-file { color: var(--muted); max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* ── Stat bar ── */
     .statbar {
@@ -140,13 +158,13 @@
     /* Doc list */
     .doc-list { flex: 1; overflow-y: auto; padding: 0; }
     .list-head {
-      display: grid; grid-template-columns: 40px 1fr 160px 100px 120px 100px;
+      display: grid; grid-template-columns: 40px 1fr 160px 100px 100px 80px 100px;
       gap: 12px; padding: 8px 20px; font-size: 10px; color: var(--muted);
       letter-spacing: 1px; text-transform: uppercase; position: sticky; top: 0;
       background: rgba(5,5,10,.95); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); z-index: 2;
     }
     .doc-row {
-      display: grid; grid-template-columns: 40px 1fr 160px 100px 120px 100px;
+      display: grid; grid-template-columns: 40px 1fr 160px 100px 100px 80px 100px;
       gap: 12px; padding: 10px 20px; align-items: center;
       border-bottom: 1px solid var(--border); transition: background .1s; cursor: default;
     }
@@ -163,6 +181,7 @@
     .doc-sub { font-size: 11px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .col-text { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .col-amount { font-size: 12px; font-weight: 500; color: var(--amber); }
+    .col-pages { font-size: 11px; color: var(--muted); }
     .col-dl { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
     .dl-link {
       width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
@@ -192,6 +211,12 @@
     }
     .empty-icon { font-size: 40px; opacity: .3; }
     .empty-text { font-size: 13px; }
+
+    /* Initial load skeleton */
+    .skeleton-wrap { flex: 1; display: flex; flex-direction: column; gap: 1px; padding: 0; }
+    .skeleton-row { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--border); }
+    .skel { background: rgba(255,255,255,.04); border-radius: 4px; animation: shimmer 1.4s ease-in-out infinite; }
+    @keyframes shimmer { 0%,100%{opacity:.4} 50%{opacity:.8} }
 
     /* Drop overlay */
     #dropOverlay {
@@ -232,6 +257,39 @@
     .folder-file:last-child { border-bottom: none; }
     .folder-file:hover { background: var(--surface-hover); color: var(--text); }
     .folder-file-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ── Log Modal ── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,.7); backdrop-filter: blur(8px);
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #0d0d16; border: 1px solid var(--border-bright);
+      border-radius: 16px; width: 760px; max-width: 95vw; max-height: 80vh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .modal-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .modal-title { font-size: 14px; font-weight: 600; }
+    .modal-close {
+      width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-family: inherit;
+      transition: all .12s;
+    }
+    .modal-close:hover { background: var(--surface-hover); color: var(--text); }
+    .modal-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+    .log-line {
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 11px;
+      color: var(--muted); padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.02);
+      line-height: 1.5;
+    }
+    .log-line.error { color: var(--red); }
+    .log-empty { font-size: 13px; color: var(--muted); text-align: center; padding: 40px; }
   </style>
 </head>
 <body>
@@ -240,6 +298,18 @@
   <div class="drop-ring">⬆</div>
   <div class="drop-text">Dateien ablegen</div>
   <div class="drop-sub">PDF · JPG · PNG · TIFF · WEBP</div>
+</div>
+
+<div id="logModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title">Fehlerlog</span>
+      <button class="modal-close" id="modalCloseBtn">✕</button>
+    </div>
+    <div class="modal-body" id="logModalBody">
+      <div class="log-empty">Lade…</div>
+    </div>
+  </div>
 </div>
 
 <div id="app"></div>
@@ -258,242 +328,366 @@ const CATS = {
 };
 const CAT_KEYS = Object.keys(CATS);
 
-let S = { docs:[], pending:[], active:false, kat:'Alle', view:'liste', q:'', year:'', editing:null };
+let S = {
+  docs: [], pending: [], active: false,
+  kat: 'Alle', view: 'liste', q: '', year: '', editing: null,
+  loading: true,
+  queueLength: 0, currentFile: null, errorCount: 0, processedToday: 0,
+};
 function set(p) { Object.assign(S, p); render(); }
 
 // ── API ───────────────────────────────────────────────────────────────────────
 async function load() {
-  const [d,p,s] = await Promise.all([fetch('/api/documents'),fetch('/api/pending'),fetch('/api/status')]);
-  set({ docs:await d.json(), pending:await p.json(), active:(await s.json()).scanner==='active' });
+  const [d,p,s] = await Promise.all([
+    fetch('/api/documents'),
+    fetch('/api/pending'),
+    fetch('/api/status'),
+  ]);
+  const status = await s.json();
+  set({
+    docs: await d.json(),
+    pending: await p.json(),
+    active: status.scanner === 'active',
+    queueLength:    status.queueLength    || 0,
+    currentFile:    status.currentFile    || null,
+    errorCount:     status.errorCount     || 0,
+    processedToday: status.processedToday || 0,
+    loading: false,
+  });
 }
+
+async function pollStatus() {
+  try {
+    const s = await fetch('/api/status').then(r => r.json());
+    const prev = S.queueLength;
+    set({
+      active:         s.scanner === 'active',
+      queueLength:    s.queueLength    || 0,
+      currentFile:    s.currentFile    || null,
+      errorCount:     s.errorCount     || 0,
+      processedToday: s.processedToday || 0,
+    });
+    // Wenn Queue gerade leer wurde → Dokumente neu laden
+    if (prev > 0 && (s.queueLength || 0) === 0) load();
+  } catch {}
+}
+
 async function upload(files) {
-  const fd=new FormData();
-  for(const f of files) fd.append('files',f);
-  await fetch('/api/upload',{method:'POST',body:fd});
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  await fetch('/api/upload', { method: 'POST', body: fd });
   load();
 }
 async function rename(id, newName) {
-  const r=await fetch(`/api/rename/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({newName})});
-  if(!r.ok){alert('Fehler beim Umbenennen');return;}
-  const u=await r.json();
-  set({docs:S.docs.map(d=>d.id===id?u:d),editing:null});
+  const r = await fetch(`/api/rename/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ newName }) });
+  if (!r.ok) { alert('Fehler beim Umbenennen'); return; }
+  const u = await r.json();
+  set({ docs: S.docs.map(d => d.id === id ? u : d), editing: null });
 }
 async function changeKat(id, newKat) {
-  const r=await fetch(`/api/kategorize/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({newKat})});
-  if(!r.ok){alert('Fehler');return;}
-  const u=await r.json();
-  set({docs:S.docs.map(d=>d.id===id?u:d)});
+  const r = await fetch(`/api/kategorize/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ newKat }) });
+  if (!r.ok) { alert('Fehler'); return; }
+  const u = await r.json();
+  set({ docs: S.docs.map(d => d.id === id ? u : d) });
 }
+
+// ── Log Modal ─────────────────────────────────────────────────────────────────
+async function openLogModal() {
+  document.getElementById('logModal').classList.add('open');
+  document.getElementById('logModalBody').innerHTML = '<div class="log-empty">Lade…</div>';
+  try {
+    const data = await fetch('/api/logs').then(r => r.json());
+    const body = document.getElementById('logModalBody');
+    body.innerHTML = '';
+    if (!data.lines || data.lines.length === 0) {
+      body.innerHTML = '<div class="log-empty">Keine Einträge</div>';
+      return;
+    }
+    for (const line of data.lines) {
+      const el = document.createElement('div');
+      el.className = 'log-line' + (line.toLowerCase().includes('error') || line.toLowerCase().includes('fehler') ? ' error' : '');
+      el.textContent = line;
+      body.appendChild(el);
+    }
+    body.scrollTop = body.scrollHeight;
+  } catch {
+    document.getElementById('logModalBody').innerHTML = '<div class="log-empty">Fehler beim Laden</div>';
+  }
+}
+
+document.getElementById('modalCloseBtn').addEventListener('click', () => {
+  document.getElementById('logModal').classList.remove('open');
+});
+document.getElementById('logModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('logModal'))
+    document.getElementById('logModal').classList.remove('open');
+});
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 function vis() {
-  return S.docs.filter(d=>{
-    if(S.kat!=='Alle'&&d.kategorie!==S.kat)return false;
-    if(S.year&&(!d.datum||!d.datum.startsWith(S.year)))return false;
-    if(S.q.trim()){const q=S.q.toLowerCase();if(!d.name.toLowerCase().includes(q)&&!(d.absender||'').toLowerCase().includes(q))return false;}
+  return S.docs.filter(d => {
+    if (S.kat !== 'Alle' && d.kategorie !== S.kat) return false;
+    if (S.year && (!d.datum || !d.datum.startsWith(S.year))) return false;
+    if (S.q.trim()) {
+      const q = S.q.toLowerCase();
+      if (!d.name.toLowerCase().includes(q) && !(d.absender||'').toLowerCase().includes(q)) return false;
+    }
     return true;
   });
 }
-function getYears(){return[...new Set(S.docs.map(d=>d.datum?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a);}
-function getCounts(){const c={Alle:S.docs.length};for(const d of S.docs)c[d.kategorie]=(c[d.kategorie]||0)+1;return c;}
-function fmt(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';return(b/1048576).toFixed(1)+' MB';}
+function getYears() { return [...new Set(S.docs.map(d => d.datum?.slice(0,4)).filter(Boolean))].sort((a,b) => b-a); }
+function getCounts() { const c = { Alle: S.docs.length }; for (const d of S.docs) c[d.kategorie] = (c[d.kategorie]||0) + 1; return c; }
+function fmt(b) { if (b < 1024) return b+' B'; if (b < 1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
-function h(tag,attrs,...kids){
-  const el=document.createElement(tag);
-  for(const[k,v]of Object.entries(attrs||{})){
-    if(k==='style'&&typeof v==='object')Object.assign(el.style,v);
-    else if(k.startsWith('on'))el.addEventListener(k.slice(2).toLowerCase(),v);
-    else if(k==='cls')el.className=v;
-    else el.setAttribute(k,v);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs||{})) {
+    if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === 'cls') el.className = v;
+    else el.setAttribute(k, v);
   }
-  for(const c of kids.flat())if(c!=null)el.appendChild(typeof c==='string'?document.createTextNode(c):c);
+  for (const c of kids.flat()) if (c != null) el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
   return el;
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function render() {
-  const app=document.getElementById('app');
-  app.innerHTML='';
+  const app = document.getElementById('app');
+  app.innerHTML = '';
 
-  const docs=vis(), yrs=getYears(), counts=getCounts();
-  const done=S.docs.length, busy=S.pending.length, pct=done+busy>0?Math.round(done/(done+busy)*100):100;
+  const docs = vis(), yrs = getYears(), counts = getCounts();
+  const done = S.docs.length, busy = S.pending.length, pct = done+busy > 0 ? Math.round(done/(done+busy)*100) : 100;
 
   // ── Topbar ──
-  const fileInput=h('input',{type:'file',accept:'.pdf,.jpg,.jpeg,.png,.tiff,.tif,.webp',multiple:true,style:{display:'none'},
-    onChange:e=>{if(e.target.files.length)upload(Array.from(e.target.files));e.target.value='';}});
+  const fileInput = h('input', { type:'file', accept:'.pdf,.jpg,.jpeg,.png,.tiff,.tif,.webp', multiple:true, style:{display:'none'},
+    onChange: e => { if (e.target.files.length) upload(Array.from(e.target.files)); e.target.value = ''; }
+  });
 
-  const topbar=h('div',{cls:'topbar'},
-    h('div',{cls:'logo'},'DokuScan'),
-    h('div',{cls:`status-pill${S.active?' on':''}`},
-      h('div',{cls:'dot'}),
-      S.active?'Scanner aktiv':'Scanner inaktiv'
+  const topbar = h('div', { cls:'topbar' },
+    h('div', { cls:'logo' }, 'DokuScan'),
+    h('div', { cls:`status-pill${S.active?' on':''}` },
+      h('div', { cls:'dot' }),
+      S.active ? 'Scanner aktiv' : 'Scanner inaktiv'
     ),
-    h('div',{cls:'topbar-actions'},
-      h('label',{style:{cursor:'pointer'}},
+    h('div', { cls:'topbar-actions' },
+      h('label', { style:{ cursor:'pointer' } },
         fileInput,
-        h('span',{cls:'btn btn-ghost',onClick:()=>fileInput.click()},'⬆ Upload')
+        h('span', { cls:'btn btn-ghost', onClick:()=>fileInput.click() }, '⬆ Upload')
       ),
-      h('div',{cls:'view-toggle'},
-        h('button',{cls:`view-btn${S.view==='liste'?' active':''}`,onClick:()=>set({view:'liste'})},'Liste'),
-        h('button',{cls:`view-btn${S.view==='ordner'?' active':''}`,onClick:()=>set({view:'ordner'})},'Ordner')
+      h('div', { cls:'view-toggle' },
+        h('button', { cls:`view-btn${S.view==='liste'?' active':''}`, onClick:()=>set({view:'liste'}) }, 'Liste'),
+        h('button', { cls:`view-btn${S.view==='ordner'?' active':''}`, onClick:()=>set({view:'ordner'}) }, 'Ordner')
       ),
-      h('button',{cls:'btn btn-zip',onClick:()=>{
-        const p=new URLSearchParams();
-        if(S.kat!=='Alle')p.set('kat',S.kat);
-        if(S.year)p.set('year',S.year);
-        const qs=p.toString();window.location='/api/export-zip'+(qs?'?'+qs:'');
-      }},'⬇ ZIP')
+      h('button', { cls:'btn btn-zip', onClick:() => {
+        const p = new URLSearchParams();
+        if (S.kat !== 'Alle') p.set('kat', S.kat);
+        if (S.year) p.set('year', S.year);
+        const qs = p.toString(); window.location = '/api/export-zip' + (qs ? '?'+qs : '');
+      }}, '⬇ ZIP'),
+      h('button', { cls:'btn btn-log', onClick: openLogModal }, '⚠ Fehlerlog')
     )
   );
 
+  // ── Queue-Banner ──
+  let queueBanner = null;
+  if (S.queueLength > 0 || S.currentFile) {
+    const qLen = S.queueLength;
+    const label = qLen > 0 ? `Verarbeite ${qLen} Dokument${qLen > 1 ? 'e' : ''}…` : 'Verarbeite…';
+    queueBanner = h('div', { cls:'queue-banner' },
+      h('div', { cls:'queue-dot' }),
+      h('span', { style:{ color:'#22c55e', fontWeight:500 } }, label),
+      S.currentFile ? h('span', { cls:'queue-file' }, S.currentFile) : null
+    );
+  }
+
   // ── StatBar ──
-  const statbar=h('div',{cls:'statbar'},
-    h('div',{cls:'stat'},h('span',{cls:'stat-val',style:{color:'#22c55e'}},String(done)),h('span',{cls:'stat-lbl'},'Archiviert')),
-    h('div',{cls:'stat-sep'}),
-    h('div',{cls:'stat'},h('span',{cls:'stat-val',style:{color:busy>0?'#f59e0b':'#2a2a3a'}},String(busy)),h('span',{cls:'stat-lbl'},'In Eingang')),
-    h('div',{cls:'stat-sep'}),
-    h('div',{cls:'stat'},h('span',{cls:'stat-val',style:{color:'#6366f1'}},String(CAT_KEYS.filter(k=>counts[k]).length)),h('span',{cls:'stat-lbl'},'Kategorien')),
-    h('div',{cls:'prog-wrap'},
-      h('div',{cls:'prog-bar'},h('div',{cls:'prog-fill',style:{width:pct+'%'}})),
-      h('span',{cls:'prog-pct'},pct+'%')
+  const statbar = h('div', { cls:'statbar' },
+    h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:'#22c55e' } }, String(done)), h('span', { cls:'stat-lbl' }, 'Archiviert')),
+    h('div', { cls:'stat-sep' }),
+    h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:busy>0?'#f59e0b':'#2a2a3a' } }, String(busy)), h('span', { cls:'stat-lbl' }, 'In Eingang')),
+    h('div', { cls:'stat-sep' }),
+    h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:'#6366f1' } }, String(CAT_KEYS.filter(k=>counts[k]).length)), h('span', { cls:'stat-lbl' }, 'Kategorien')),
+    S.processedToday > 0 ? h('div', { cls:'stat-sep' }) : null,
+    S.processedToday > 0 ? h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:'#06b6d4' } }, String(S.processedToday)), h('span', { cls:'stat-lbl' }, 'Heute')) : null,
+    S.errorCount > 0 ? h('div', { cls:'stat-sep' }) : null,
+    S.errorCount > 0 ? h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:'var(--red)' } }, String(S.errorCount)), h('span', { cls:'stat-lbl' }, 'Fehler')) : null,
+    h('div', { cls:'prog-wrap' },
+      h('div', { cls:'prog-bar' }, h('div', { cls:'prog-fill', style:{ width:pct+'%' } })),
+      h('span', { cls:'prog-pct' }, pct+'%')
     )
   );
 
   // ── Sidebar ──
-  const sidebar=h('div',{cls:'sidebar'});
-  sidebar.appendChild(h('div',{cls:'sidebar-title'},'Kategorien'));
-  for(const cat of ['Alle',...CAT_KEYS.filter(k=>counts[k])]){
-    const info=CATS[cat], active=S.kat===cat, cnt=counts[cat]||0;
-    const item=h('div',{cls:`cat-item${active?' active':''}`,onClick:()=>set({kat:cat})},
-      h('div',{cls:'cat-dot',style:{background:info?.color||'#6366f1',boxShadow:active?`0 0 6px ${info?.color||'#6366f1'}`:'none'}}),
-      h('span',{},cat),
-      cnt>0?h('span',{cls:'cat-count'},String(cnt)):null
+  const sidebar = h('div', { cls:'sidebar' });
+  sidebar.appendChild(h('div', { cls:'sidebar-title' }, 'Kategorien'));
+  for (const cat of ['Alle', ...CAT_KEYS.filter(k => counts[k])]) {
+    const info = CATS[cat], active = S.kat === cat, cnt = counts[cat] || 0;
+    const item = h('div', { cls:`cat-item${active?' active':''}`, onClick:()=>set({kat:cat}) },
+      h('div', { cls:'cat-dot', style:{ background:info?.color||'#6366f1', boxShadow:active?`0 0 6px ${info?.color||'#6366f1'}`:'none' } }),
+      h('span', {}, cat),
+      cnt > 0 ? h('span', { cls:'cat-count' }, String(cnt)) : null
     );
-    if(active)item.style.borderLeftColor=info?.color||'#6366f1';
+    if (active) item.style.borderLeftColor = info?.color || '#6366f1';
     sidebar.appendChild(item);
   }
 
   // ── Main ──
-  const qInput=h('input',{cls:'search-input',type:'text',placeholder:'Suche nach Name, Absender…'});
-  qInput.value=S.q;
-  qInput.addEventListener('input',e=>set({q:e.target.value}));
+  const qInput = h('input', { cls:'search-input', type:'text', placeholder:'Suche nach Name, Absender…' });
+  qInput.value = S.q;
+  qInput.addEventListener('input', e => set({ q: e.target.value }));
 
-  const yrSel=h('select',{cls:'year-sel',onChange:e=>set({year:e.target.value})},
-    h('option',{value:''},'Alle Jahre'),
-    ...yrs.map(y=>{const o=h('option',{value:y},y);if(y===S.year)o.selected=true;return o;})
+  const yrSel = h('select', { cls:'year-sel', onChange:e=>set({year:e.target.value}) },
+    h('option', { value:'' }, 'Alle Jahre'),
+    ...yrs.map(y => { const o = h('option', { value:y }, y); if (y === S.year) o.selected = true; return o; })
   );
 
-  const toolbar=h('div',{cls:'toolbar'},
-    h('div',{cls:'search-wrap'},h('span',{cls:'search-icon'},'⌕'),qInput),
+  const toolbar = h('div', { cls:'toolbar' },
+    h('div', { cls:'search-wrap' }, h('span', { cls:'search-icon' }, '⌕'), qInput),
     yrSel,
-    h('span',{cls:'doc-count'},docs.length+' Dok.')
+    h('span', { cls:'doc-count' }, docs.length+' Dok.')
   );
 
   let contentEl;
 
-  if(S.view==='ordner'){
-    const grid=h('div',{cls:'folder-grid'});
-    const byKat={};
-    for(const d of docs)(byKat[d.kategorie]=byKat[d.kategorie]||[]).push(d);
-    for(const[kat,kd]of Object.entries(byKat)){
-      const info=CATS[kat]||CATS.Sonstiges;
-      grid.appendChild(h('div',{cls:'folder-card'},
-        h('div',{cls:'folder-card-head',style:{borderLeftColor:info.color}},
-          h('span',{style:{fontSize:16}},info.emoji),
-          h('span',{cls:'folder-card-name',style:{color:info.color}},kat),
-          h('span',{cls:'folder-card-count'},kd.length)
+  if (S.loading) {
+    const skeletons = Array.from({ length: 8 }).map(() =>
+      h('div', { cls:'skeleton-row' },
+        h('div', { cls:'skel', style:{ width:'32px', height:'32px', borderRadius:'8px', flexShrink:'0' } }),
+        h('div', { style:{ flex:'1', display:'flex', flexDirection:'column', gap:'6px' } },
+          h('div', { cls:'skel', style:{ width:'60%', height:'12px' } }),
+          h('div', { cls:'skel', style:{ width:'40%', height:'10px' } })
         ),
-        ...kd.map(d=>h('a',{cls:'folder-file',href:'/api/download/'+d.id},
-          h('span',{},info.emoji),
-          h('span',{cls:'folder-file-name'},d.name)
+        h('div', { cls:'skel', style:{ width:'100px', height:'10px' } }),
+        h('div', { cls:'skel', style:{ width:'80px', height:'10px' } }),
+        h('div', { cls:'skel', style:{ width:'60px', height:'10px' } }),
+        h('div', { cls:'skel', style:{ width:'28px', height:'28px', borderRadius:'7px' } })
+      )
+    );
+    contentEl = h('div', { cls:'doc-list skeleton-wrap' }, ...skeletons);
+  } else if (S.view === 'ordner') {
+    const grid = h('div', { cls:'folder-grid' });
+    const byKat = {};
+    for (const d of docs) (byKat[d.kategorie] = byKat[d.kategorie] || []).push(d);
+    for (const [kat, kd] of Object.entries(byKat)) {
+      const info = CATS[kat] || CATS.Sonstiges;
+      grid.appendChild(h('div', { cls:'folder-card' },
+        h('div', { cls:'folder-card-head', style:{ borderLeftColor:info.color } },
+          h('span', { style:{ fontSize:16 } }, info.emoji),
+          h('span', { cls:'folder-card-name', style:{ color:info.color } }, kat),
+          h('span', { cls:'folder-card-count' }, kd.length)
+        ),
+        ...kd.map(d => h('a', { cls:'folder-file', href:'/api/download/'+d.id },
+          h('span', {}, info.emoji),
+          h('span', { cls:'folder-file-name' }, d.name)
         ))
       ));
     }
-    contentEl=h('div',{cls:'doc-list'},grid);
-  } else if(docs.length){
-    const head=h('div',{cls:'list-head'},
-      h('span',{}),h('span',{},'Dateiname'),h('span',{},'Absender'),h('span',{},'Datum'),h('span',{},'Betrag'),h('span',{})
+    contentEl = h('div', { cls:'doc-list' }, grid);
+  } else if (docs.length) {
+    const head = h('div', { cls:'list-head' },
+      h('span', {}), h('span', {}, 'Dateiname'), h('span', {}, 'Absender'),
+      h('span', {}, 'Datum'), h('span', {}, 'Betrag'), h('span', {}, 'Seiten'), h('span', {})
     );
-    const rows=docs.map(doc=>{
-      const info=CATS[doc.kategorie]||CATS.Sonstiges;
-      const isEd=S.editing===doc.id;
+    const rows = docs.map(doc => {
+      const info = CATS[doc.kategorie] || CATS.Sonstiges;
+      const isEd = S.editing === doc.id;
 
       let nameEl;
-      if(isEd){
-        const inp=h('input',{cls:'name-edit-input',value:doc.name,
-          onKeydown:e=>{if(e.key==='Enter'){e.preventDefault();rename(doc.id,e.target.value);}if(e.key==='Escape')set({editing:null});}});
-        setTimeout(()=>inp.focus(),30);
-        nameEl=h('div',{style:{minWidth:0}},inp,h('div',{cls:'doc-sub'},'↵ Speichern  ·  Esc Abbrechen'));
+      if (isEd) {
+        const inp = h('input', { cls:'name-edit-input', value:doc.name,
+          onKeydown: e => {
+            if (e.key === 'Enter') { e.preventDefault(); rename(doc.id, e.target.value); }
+            if (e.key === 'Escape') set({ editing: null });
+          }
+        });
+        setTimeout(() => inp.focus(), 30);
+        nameEl = h('div', { style:{ minWidth:0 } }, inp, h('div', { cls:'doc-sub' }, '↵ Speichern  ·  Esc Abbrechen'));
       } else {
-        nameEl=h('div',{style:{minWidth:0}},
-          h('div',{cls:'doc-name-text',onClick:()=>set({editing:doc.id}),title:'Klicken zum Umbenennen'},doc.name),
-          doc.zusammenfassung?h('div',{cls:'doc-sub'},doc.zusammenfassung):h('div',{cls:'doc-sub'},fmt(doc.size))
+        nameEl = h('div', { style:{ minWidth:0 } },
+          h('div', { cls:'doc-name-text', onClick:()=>set({editing:doc.id}), title:'Klicken zum Umbenennen' }, doc.name),
+          doc.zusammenfassung
+            ? h('div', { cls:'doc-sub' }, doc.zusammenfassung)
+            : h('div', { cls:'doc-sub' }, fmt(doc.size))
         );
       }
 
-      const katSel=h('select',{cls:'kat-sel',style:{color:info.color,borderColor:info.color+'44',background:info.bg},
-        onChange:e=>changeKat(doc.id,e.target.value)},
-        ...CAT_KEYS.map(k=>{const o=h('option',{value:k},k);if(k===doc.kategorie)o.selected=true;return o;})
-      );
+      const katSel = h('select', { cls:'kat-sel', style:{ color:info.color, borderColor:info.color+'44', background:info.bg },
+        onChange: e => changeKat(doc.id, e.target.value)
+      }, ...CAT_KEYS.map(k => { const o = h('option', { value:k }, k); if (k === doc.kategorie) o.selected = true; return o; }));
 
-      return h('div',{cls:'doc-row'},
-        h('div',{cls:'doc-icon',style:{background:info.bg}},h('span',{style:{fontSize:16}},info.emoji)),
+      return h('div', { cls:'doc-row' },
+        h('div', { cls:'doc-icon', style:{ background:info.bg } }, h('span', { style:{ fontSize:16 } }, info.emoji)),
         nameEl,
-        h('div',{cls:'col-text'},doc.absender||'—'),
-        h('div',{cls:'col-text'},doc.datum||'—'),
-        doc.betrag?h('div',{cls:'col-amount'},doc.betrag):h('div',{cls:'col-text'},'—'),
-        h('div',{cls:'col-dl'},katSel,h('a',{cls:'dl-link',href:'/api/download/'+doc.id,title:'Download'},'↓'))
+        h('div', { cls:'col-text' }, doc.absender || '—'),
+        h('div', { cls:'col-text' }, doc.datum || '—'),
+        doc.betrag ? h('div', { cls:'col-amount' }, doc.betrag) : h('div', { cls:'col-text' }, '—'),
+        doc.pages  ? h('div', { cls:'col-pages' }, doc.pages + ' S.') : h('div', { cls:'col-text' }, '—'),
+        h('div', { cls:'col-dl' }, katSel, h('a', { cls:'dl-link', href:'/api/download/'+doc.id, title:'Download' }, '↓'))
       );
     });
-    contentEl=h('div',{cls:'doc-list'},head,...rows);
+    contentEl = h('div', { cls:'doc-list' }, head, ...rows);
   } else {
-    contentEl=h('div',{cls:'empty'},
-      h('div',{cls:'empty-icon'},S.docs.length>0?'🔍':'📂'),
-      h('div',{cls:'empty-text'},S.docs.length>0?'Keine Treffer — Filter anpassen':'Noch keine Dokumente')
+    contentEl = h('div', { cls:'empty' },
+      h('div', { cls:'empty-icon' }, S.docs.length > 0 ? '🔍' : '📂'),
+      h('div', { cls:'empty-text' }, S.docs.length > 0 ? 'Keine Treffer — Filter anpassen' : 'Noch keine Dokumente')
     );
   }
 
-  let processingEl=null;
-  if(S.pending.length>0){
-    processingEl=h('div',{cls:'processing-bar'},
-      h('div',{cls:'processing-spinner'}),
-      h('span',{style:{color:'#6366f1',fontWeight:500}},S.pending.length+' Dok.'),
-      h('span',{style:{color:'var(--muted)'}},'werden analysiert…')
+  let processingEl = null;
+  if (S.pending.length > 0) {
+    processingEl = h('div', { cls:'processing-bar' },
+      h('div', { cls:'processing-spinner' }),
+      h('span', { style:{ color:'#6366f1', fontWeight:500 } }, S.pending.length+' Dok.'),
+      h('span', { style:{ color:'var(--muted)' } }, 'werden analysiert…')
     );
   }
 
-  const main=h('div',{cls:'main'},toolbar,...(processingEl?[processingEl]:[]),contentEl);
+  const main = h('div', { cls:'main' }, toolbar, ...(processingEl?[processingEl]:[]), contentEl);
 
-  const shell=h('div',{cls:'shell'},
+  const shellChildren = [
     topbar,
-    h('div',{cls:'divider'}),
+    h('div', { cls:'divider' }),
+    ...(queueBanner ? [queueBanner] : []),
     statbar,
-    h('div',{cls:'content'},sidebar,h('div',{cls:'divider'}),main)
-  );
+    h('div', { cls:'content' }, sidebar, h('div', { cls:'divider' }), main)
+  ];
+
+  // Adjust grid rows when queue banner is shown
+  const shell = h('div', { cls:'shell' }, ...shellChildren);
+  if (queueBanner) {
+    shell.style.gridTemplateRows = '56px 1px auto auto auto 1fr';
+  }
+
   app.appendChild(shell);
 }
 
 // ── Drag & Drop ───────────────────────────────────────────────────────────────
-const overlay=document.getElementById('dropOverlay');
-let dc=0;
-document.addEventListener('dragenter',e=>{e.preventDefault();dc++;overlay.classList.add('on');});
-document.addEventListener('dragleave',()=>{if(--dc<=0){dc=0;overlay.classList.remove('on');}});
-document.addEventListener('dragover',e=>e.preventDefault());
-document.addEventListener('drop',e=>{
-  e.preventDefault();dc=0;overlay.classList.remove('on');
-  const files=Array.from(e.dataTransfer.files).filter(f=>/\.(pdf|jpe?g|png|tiff?|webp)$/i.test(f.name));
-  if(files.length)upload(files);
+const overlay = document.getElementById('dropOverlay');
+let dc = 0;
+document.addEventListener('dragenter', e => { e.preventDefault(); dc++; overlay.classList.add('on'); });
+document.addEventListener('dragleave', () => { if (--dc <= 0) { dc = 0; overlay.classList.remove('on'); } });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault(); dc = 0; overlay.classList.remove('on');
+  const files = Array.from(e.dataTransfer.files).filter(f => /\.(pdf|jpe?g|png|tiff?|webp)$/i.test(f.name));
+  if (files.length) upload(files);
 });
 
 // ── Poll ──────────────────────────────────────────────────────────────────────
 load();
-setInterval(()=>{
-  fetch('/api/pending').then(r=>r.json()).then(p=>{if(p.length!==S.pending.length)load();else if(p.length>0)set({pending:p});});
-},4000);
-setInterval(()=>{
-  fetch('/api/status').then(r=>r.json()).then(s=>{const a=s.scanner==='active';if(a!==S.active)set({active:a});});
-},30000);
+
+// Status alle 3s pollen (Queue, aktuelles Dokument)
+setInterval(pollStatus, 3000);
+
+// Pending-Dateien alle 4s prüfen
+setInterval(() => {
+  fetch('/api/pending').then(r => r.json()).then(p => {
+    if (p.length !== S.pending.length) load();
+    else if (p.length > 0) set({ pending: p });
+  });
+}, 4000);
 </script>
 </body>
 </html>

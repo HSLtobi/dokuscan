@@ -15,6 +15,63 @@ const EINGANG = process.env.SCAN_EINGANG || '/home/pi/Scanner/Eingang';
 const ARCHIV  = process.env.SCAN_ARCHIV  || '/home/pi/Scanner/Archiv';
 const KATEGORIEN = ['Rechnung','Vertrag','Kontoauszug','Versicherung','Brief','Steuer','Behoerde','Medizin','Sonstiges'];
 
+const LOG_DIR    = path.join(__dirname, 'logs');
+const ERROR_LOG  = path.join(LOG_DIR, 'error.log');
+const STATUS_FILE = path.join(LOG_DIR, 'status.json');
+
+fs.mkdirSync(LOG_DIR, { recursive: true });
+
+// ── Logging ───────────────────────────────────────────────────────────────────
+function logError(filename, message) {
+  const line = `[${new Date().toISOString()}] [${filename || 'system'}] ${message}\n`;
+  try { fs.appendFileSync(ERROR_LOG, line); } catch {}
+  console.error(`[DokuScan] ❌ ${message}`);
+}
+
+// ── Status-Datei ──────────────────────────────────────────────────────────────
+let statusState = {
+  queueLength:    0,
+  currentFile:    null,
+  errorCount:     0,
+  processedToday: 0,
+  lastUpdated:    null,
+};
+
+function loadStatus() {
+  try {
+    const raw = fs.readFileSync(STATUS_FILE, 'utf8');
+    const saved = JSON.parse(raw);
+    const today = new Date().toISOString().split('T')[0];
+    if (saved.date === today) {
+      statusState.processedToday = saved.processedToday || 0;
+      statusState.errorCount     = saved.errorCount     || 0;
+    }
+  } catch {}
+}
+
+function saveStatus() {
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    fs.writeFileSync(STATUS_FILE, JSON.stringify({
+      ...statusState,
+      date:        today,
+      lastUpdated: new Date().toISOString(),
+    }, null, 2));
+  } catch {}
+}
+
+loadStatus();
+
+// ── Absturzsicherheit ─────────────────────────────────────────────────────────
+process.on('unhandledRejection', (reason) => {
+  logError('system', `unhandledRejection: ${reason?.stack || reason}`);
+});
+
+process.on('uncaughtException', (err) => {
+  logError('system', `uncaughtException: ${err.stack || err.message}`);
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function sanitize(str) {
   return (str||'').replace(/[^a-zA-Z0-9äöüÄÖÜß\-]/g,'_').replace(/_+/g,'_').substring(0,40);
 }
@@ -57,7 +114,6 @@ function renderPageAsBase64(filePath, page) {
 
     let imgPath = path.join(dir, matches[0]);
 
-    // Kontrast verbessern mit ImageMagick falls verfügbar (hilft bei blassen Scans)
     const enhanced = imgPath.replace('.jpg', '_enh.jpg');
     const magick   = spawnSync('convert', [imgPath, '-normalize', '-contrast', '-contrast', enhanced]);
     if (magick.status === 0 && fs.existsSync(enhanced)) {
@@ -75,21 +131,19 @@ function renderPageAsBase64(filePath, page) {
 async function detectBoundaries(filePath, pageCount) {
   console.log(`[DokuScan] 🔍 Erkenne Dokumentgrenzen in ${pageCount} Seiten…`);
 
-  // Text aller Seiten sammeln
   const pages = [];
   for (let i = 1; i <= pageCount; i++) {
     const text = getPageText(filePath, i);
-    pages.push({ page: i, text, hasText: text.length > 40 });
+    pages.push({ page: i, text, hasText: text.length > 0 });
   }
 
-  const avgTextLen = pages.reduce((s,p) => s + p.text.length, 0) / pageCount;
-  const useImages  = avgTextLen < 50; // Fast kein Text → Bild-basierte Analyse
+  const totalTextLen = pages.reduce((s,p) => s + p.text.length, 0);
+  const useImages    = totalTextLen < 50; // Kein extrahierbarer Text → Bildanalyse
 
   let content;
 
   if (useImages) {
-    // Seiten als Bilder senden (max. 20 Bilder auf einmal, sonst in Blöcken)
-    console.log(`[DokuScan] 📷 Wenig Text – verwende Bildanalyse für Grenzerkennung`);
+    console.log(`[DokuScan] 📷 Kein extrahierbarer Text – verwende Bildanalyse für Grenzerkennung`);
     content = [];
     const MAX_IMGS = 20;
     const pagesToSend = pages.slice(0, MAX_IMGS);
@@ -112,7 +166,6 @@ async function detectBoundaries(filePath, pageCount) {
       `Antworte NUR mit JSON: {"boundaries":[1,3,5,...]} – Seitenzahlen wo ein neues Dokument anfängt. Seite 1 ist immer dabei.`
     });
   } else {
-    // Text-basierte Analyse
     const pagesSummary = pages.map(p =>
       `=== Seite ${p.page} ===\n${p.text || '(leer)'}`
     ).join('\n\n');
@@ -133,7 +186,6 @@ async function detectBoundaries(filePath, pageCount) {
   const result     = JSON.parse(raw);
   const boundaries = [...new Set([1, ...result.boundaries])].filter(n => n >= 1 && n <= pageCount).sort((a,b) => a-b);
 
-  // Grenzen → Seitenbereiche
   return boundaries.map((start, i) => ({
     start,
     end: i < boundaries.length - 1 ? boundaries[i+1] - 1 : pageCount
@@ -154,7 +206,7 @@ async function splitPDF(filePath, ranges) {
     const bytes    = await newDoc.save();
     const tmpPath  = path.join(os.tmpdir(), `ds_split_${start}-${end}_${Date.now()}.pdf`);
     fs.writeFileSync(tmpPath, bytes);
-    parts.push(tmpPath);
+    parts.push({ tmpPath, pageCount: end - start + 1 });
   }
 
   return parts;
@@ -176,9 +228,11 @@ async function analyzeDocument(filePath) {
     return JSON.parse(res.content[0].text.match(/\{[\s\S]*\}/)[0]);
   }
 
-  // PDF: zuerst Bild der ersten Seite + extrahierter Text
-  const text = (() => { try { return execSync(`pdftotext "${filePath}" -`, { encoding:'utf8' }).substring(0,3000); } catch { return ''; } })();
-  const b64  = renderPageAsBase64(filePath, 1);
+  // PDF: Text extrahieren
+  const text = (() => { try { return execSync(`pdftotext "${filePath}" -`, { encoding:'utf8' }).trim().substring(0,3000); } catch { return ''; } })();
+
+  // Wenn kein Text vorhanden → sofort auf Bildanalyse umschalten
+  const b64 = renderPageAsBase64(filePath, 1);
 
   let msgContent;
   if (b64) {
@@ -186,8 +240,10 @@ async function analyzeDocument(filePath) {
       { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:b64 } },
       { type:'text', text: text ? `${prompt}\n\nExtrahierter Text:\n${text}` : prompt }
     ];
+  } else if (text) {
+    msgContent = `${prompt}\n\nDokumenteninhalt:\n${text}`;
   } else {
-    msgContent = `${prompt}\n\nDokumenteninhalt:\n${text || '(nicht lesbar)'}`;
+    msgContent = `${prompt}\n\nDokumenteninhalt:\n(nicht lesbar)`;
   }
 
   const res = await withRetry(() => client.messages.create({
@@ -197,7 +253,7 @@ async function analyzeDocument(filePath) {
   return JSON.parse(res.content[0].text.match(/\{[\s\S]*\}/)[0]);
 }
 
-async function archiveDocument(filePath, originalName) {
+async function archiveDocument(filePath, originalName, pageCount) {
   const analysis  = await analyzeDocument(filePath);
   const kategorie = KATEGORIEN.includes(analysis.kategorie) ? analysis.kategorie : 'Sonstiges';
   const ext       = path.extname(filePath);
@@ -209,7 +265,6 @@ async function archiveDocument(filePath, originalName) {
   const targetDir = path.join(ARCHIV, kategorie);
   fs.mkdirSync(targetDir, { recursive: true });
 
-  // Eindeutiger Name falls Konflikt
   let targetPath = path.join(targetDir, filename);
   let counter = 1;
   while (fs.existsSync(targetPath)) {
@@ -217,7 +272,6 @@ async function archiveDocument(filePath, originalName) {
     counter++;
   }
 
-  // Cross-device safe: copy + delete statt rename
   fs.copyFileSync(filePath, targetPath);
   fs.unlinkSync(filePath);
   fs.writeFileSync(targetPath + '.meta.json', JSON.stringify({
@@ -228,52 +282,64 @@ async function archiveDocument(filePath, originalName) {
     betrag:          analysis.betrag         || null,
     zusammenfassung: analysis.zusammenfassung|| null,
     beschreibung:    analysis.beschreibung   || null,
+    pages:           pageCount               || null,
     processedAt:     new Date().toISOString(),
   }, null, 2));
 
+  statusState.processedToday++;
+  saveStatus();
+
   console.log(`[DokuScan] ✅ → ${kategorie}/${path.basename(targetPath)}`);
-  console.log(`           Absender: ${analysis.absender||'-'} | Datum: ${analysis.datum||'-'} | Betrag: ${analysis.betrag||'-'}`);
+  console.log(`           Absender: ${analysis.absender||'-'} | Datum: ${analysis.datum||'-'} | Betrag: ${analysis.betrag||'-'} | Seiten: ${pageCount||'?'}`);
 }
 
 // ── Hauptprozess ──────────────────────────────────────────────────────────────
 async function processFile(filePath) {
   console.log(`[DokuScan] 📄 Neue Datei: ${path.basename(filePath)}`);
-  await new Promise(r => setTimeout(r, 3000)); // Warten bis vollständig geschrieben
+  await new Promise(r => setTimeout(r, 3000));
 
   const ext      = path.extname(filePath).toLowerCase();
   const origName = path.basename(filePath);
 
+  statusState.currentFile = origName;
+  saveStatus();
+
   try {
-    // Nur PDFs werden auf mehrere Dokumente geprüft
     if (ext === '.pdf') {
       const pageCount = getPageCount(filePath);
       console.log(`[DokuScan] 📑 Seiten: ${pageCount}`);
 
       if (pageCount > 1) {
-        // KI-Grenzerkennung
         const ranges = await detectBoundaries(filePath, pageCount);
         console.log(`[DokuScan] 📂 ${ranges.length} Dokument(e) erkannt: ${ranges.map(r => `S.${r.start}-${r.end}`).join(', ')}`);
 
         if (ranges.length > 1) {
-          // Aufteilen & jeden Teil einzeln archivieren
           const parts = await splitPDF(filePath, ranges);
-          fs.unlinkSync(filePath); // Original löschen
-          for (const part of parts) {
-            await archiveDocument(part, origName);
+          fs.unlinkSync(filePath);
+          for (const { tmpPath, pageCount: partPages } of parts) {
+            await archiveDocument(tmpPath, origName, partPages);
           }
           return;
         }
       }
+
+      await archiveDocument(filePath, origName, pageCount);
+    } else {
+      await archiveDocument(filePath, origName, null);
     }
-
-    // Einzeldokument (Bild oder einseitiges PDF)
-    await archiveDocument(filePath, origName);
-
   } catch (err) {
-    console.error(`[DokuScan] ❌ Fehler: ${err.message}`);
+    logError(origName, err.message);
+    statusState.errorCount++;
+    saveStatus();
     const fallback = path.join(ARCHIV, 'Sonstiges');
     fs.mkdirSync(fallback, { recursive: true });
-    try { fs.renameSync(filePath, path.join(fallback, origName)); } catch {}
+    try {
+      fs.copyFileSync(filePath, path.join(fallback, origName));
+      fs.unlinkSync(filePath);
+    } catch {}
+  } finally {
+    statusState.currentFile = null;
+    saveStatus();
   }
 }
 
@@ -286,10 +352,10 @@ async function withRetry(fn, retries = 4) {
     try {
       return await fn();
     } catch (err) {
-      const is429 = err.message?.includes('429') || err.status === 429;
+      const is429    = err.message?.includes('429') || err.status === 429;
       const isTimeout = err.message?.includes('timed out') || err.message?.includes('timeout');
       if ((is429 || isTimeout) && attempt < retries) {
-        const wait = Math.pow(2, attempt + 2) * 1000; // 4s, 8s, 16s, 32s
+        const wait = Math.pow(2, attempt + 2) * 1000;
         console.log(`[DokuScan] ⏳ Rate limit / Timeout – warte ${wait/1000}s (Versuch ${attempt+1}/${retries})`);
         await new Promise(r => setTimeout(r, wait));
       } else {
@@ -303,11 +369,16 @@ async function runQueue() {
   if (processing) return;
   processing = true;
   while (queue.length > 0) {
+    statusState.queueLength = queue.length;
+    saveStatus();
     const filePath = queue.shift();
-    await processFile(filePath).catch(err =>
-      console.error(`[DokuScan] ❌ Queue-Fehler: ${err.message}`)
-    );
-    // Kurze Pause zwischen Dokumenten um Rate Limit zu schonen
+    await processFile(filePath).catch(err => {
+      logError(path.basename(filePath), `Queue-Fehler: ${err.message}`);
+      statusState.errorCount++;
+      saveStatus();
+    });
+    statusState.queueLength = queue.length;
+    saveStatus();
     if (queue.length > 0) await new Promise(r => setTimeout(r, 2000));
   }
   processing = false;
@@ -315,6 +386,8 @@ async function runQueue() {
 
 function enqueue(filePath) {
   queue.push(filePath);
+  statusState.queueLength = queue.length;
+  saveStatus();
   console.log(`[DokuScan] 📥 Eingereiht: ${path.basename(filePath)} (Queue: ${queue.length})`);
   runQueue();
 }
@@ -332,4 +405,3 @@ const watcher = chokidar.watch(EINGANG, {
 watcher.on('add', enqueue);
 console.log(`[DokuScan] 🚀 Bereit – überwache ${EINGANG}`);
 console.log(`[DokuScan] 🤖 KI-Dokumentgrenzerkennung aktiv (sequenzielle Queue)`);
-
