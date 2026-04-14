@@ -84,6 +84,59 @@ function safePath(base, ...segments) {
   return resolved;
 }
 
+// ── Leerseite / Durchschimmer-Seite erkennen ─────────────────────────────────
+// Rendert die Seite und misst den Anteil dunkler Pixel.
+// Echter Inhalt hat >2%, reiner Durchschimmer liegt meist bei <1.5%.
+function isBlankPage(filePath, page) {
+  try {
+    const tmp = path.join(os.tmpdir(), `ds_blank_${page}_${Date.now()}`);
+    spawnSync('pdftoppm', ['-jpeg', '-r', '72', '-f', String(page), '-l', String(page), filePath, tmp]);
+    const dir   = path.dirname(tmp);
+    const match = fs.readdirSync(dir).find(f => f.startsWith(path.basename(tmp) + '-') && f.endsWith('.jpg'));
+    if (!match) return false;
+    const imgPath = path.join(dir, match);
+
+    // Zähle dunkle Pixel (Wert < 128 in Graustufen)
+    const result = spawnSync('convert', [
+      imgPath, '-colorspace', 'Gray', '-threshold', '60%',
+      '-format', '%[fx:mean]', 'info:'
+    ], { encoding: 'utf8' });
+    try { fs.unlinkSync(imgPath); } catch {}
+
+    const mean = parseFloat(result.stdout);
+    // mean = Anteil weißer Pixel nach Threshold; 1-mean = dunkle Pixel
+    // Leerseite/Durchschimmer: fast alles weiß → mean > 0.985
+    return !isNaN(mean) && mean > 0.985;
+  } catch { return false; }
+}
+
+// ── Leere Rückseiten aus PDF entfernen ───────────────────────────────────────
+async function removeBlankPages(filePath, pageCount) {
+  const blankPages = new Set();
+  for (let i = 1; i <= pageCount; i++) {
+    if (isBlankPage(filePath, i)) {
+      blankPages.add(i);
+      console.log(`[DokuScan] 🗑  Seite ${i} leer/Durchschimmer – wird entfernt`);
+    }
+  }
+  if (blankPages.size === 0) return pageCount;
+
+  // Nur behalten wenn nicht ALLE Seiten leer sind
+  const keepPages = Array.from({ length: pageCount }, (_, i) => i + 1).filter(p => !blankPages.has(p));
+  if (keepPages.length === 0) return pageCount; // Sicherheitsnetz
+
+  const srcBytes = fs.readFileSync(filePath);
+  const srcDoc   = await PDFDocument.load(srcBytes);
+  const newDoc   = await PDFDocument.create();
+  const copied   = await newDoc.copyPages(srcDoc, keepPages.map(p => p - 1));
+  copied.forEach(p => newDoc.addPage(p));
+  const bytes    = await newDoc.save();
+  fs.writeFileSync(filePath, bytes);
+
+  console.log(`[DokuScan] ✂️  ${blankPages.size} Leerseite(n) entfernt, ${keepPages.length} Seiten behalten`);
+  return keepPages.length;
+}
+
 // ── Korrupte PDF reparieren (ghostscript) ────────────────────────────────────
 function repairPDF(filePath) {
   const repaired = filePath.replace(/\.pdf$/i, '_repaired.pdf');
@@ -429,8 +482,11 @@ async function processFile(filePath) {
       const tesseractCheck = spawnSync('which', ['tesseract']);
       if (tesseractCheck.status === 0) fixMirroredScan(filePath);
 
-      const pageCount = getPageCount(filePath);
-      console.log(`[DokuScan] 📑 Seiten: ${pageCount}`);
+      // Leerseiten / Durchschimmer-Rückseiten entfernen
+      let pageCount = getPageCount(filePath);
+      console.log(`[DokuScan] 📑 Seiten vor Leerseiten-Check: ${pageCount}`);
+      if (pageCount > 1) pageCount = await removeBlankPages(filePath, pageCount);
+      console.log(`[DokuScan] 📑 Seiten nach Leerseiten-Check: ${pageCount}`);
 
       if (pageCount > 1) {
         const ranges = await detectBoundaries(filePath, pageCount);
