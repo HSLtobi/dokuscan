@@ -439,7 +439,7 @@ async function archiveDocument(filePath, originalName, pageCount) {
 
   fs.copyFileSync(filePath, targetPath);
   fs.unlinkSync(filePath);
-  fs.writeFileSync(targetPath + '.meta.json', JSON.stringify({
+  const meta = {
     originalName,
     kategorie,
     datum:           analysis.datum          || null,
@@ -449,13 +449,62 @@ async function archiveDocument(filePath, originalName, pageCount) {
     beschreibung:    analysis.beschreibung   || null,
     pages:           pageCount               || null,
     processedAt:     new Date().toISOString(),
-  }, null, 2));
+  };
+  fs.writeFileSync(targetPath + '.meta.json', JSON.stringify(meta, null, 2));
 
   statusState.processedToday++;
   saveStatus();
 
   console.log(`[DokuScan] ✅ → ${kategorie}/${path.basename(targetPath)}`);
   console.log(`           Absender: ${analysis.absender||'-'} | Datum: ${analysis.datum||'-'} | Betrag: ${analysis.betrag||'-'} | Seiten: ${pageCount||'?'}`);
+
+  // ── Auto-Push an Vertragsmanagement (contract-manager) ────────────────────
+  if (kategorie === 'Vertrag' || kategorie === 'Versicherung') {
+    pushToContractManager(targetPath, meta).catch(e =>
+      logError(originalName, `Push an Vertragsmanagement fehlgeschlagen: ${e.message}`)
+    );
+  }
+}
+
+// ── Push an Vertragsmanagement (contract-manager) ───────────────────────────
+async function pushToContractManager(filePath, meta) {
+  const base = (process.env.CONTRACT_MANAGER_URL || '').replace(/\/$/, '');
+  const key  = process.env.CONTRACT_MANAGER_INTAKE_KEY;
+  if (!base || !key) {
+    console.log('[DokuScan] ℹ️  CONTRACT_MANAGER_URL/KEY nicht gesetzt -- Push uebersprungen');
+    return;
+  }
+  const form = new FormData();
+  const buf  = fs.readFileSync(filePath);
+  const blob = new Blob([buf], { type: 'application/pdf' });
+  form.append('file', blob, path.basename(filePath));
+  form.append('meta', JSON.stringify({
+    kategorie:       meta.kategorie,
+    datum:           meta.datum,
+    absender:        meta.absender,
+    beschreibung:    meta.beschreibung,
+    betrag:          meta.betrag,
+    zusammenfassung: meta.zusammenfassung,
+    pages:           meta.pages,
+    original_name:   meta.originalName,
+  }));
+  form.append('source', 'dokuscan-pi');
+
+  const res = await fetch(`${base}/api/intake/contract`, {
+    method: 'POST',
+    headers: { 'X-Intake-Key': key },
+    body: form,
+  });
+  const txt = await res.text();
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${txt.slice(0, 200)}`);
+  }
+  let j; try { j = JSON.parse(txt); } catch { j = {}; }
+  if (j.duplicate) {
+    console.log(`[DokuScan] ⟳  Bereits in Vertragsmanagement (#${j.contract_id})`);
+  } else {
+    console.log(`[DokuScan] 📤  → Vertragsmanagement: ${j.contract_number} (id=${j.contract_id})`);
+  }
 }
 
 // ── Hauptprozess ──────────────────────────────────────────────────────────────

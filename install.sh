@@ -45,6 +45,9 @@ cat > "$DOKUSCAN_DIR/.env" << EOF
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 SCAN_EINGANG=/home/pi/Scanner/Eingang
 SCAN_ARCHIV=/home/pi/Scanner/Archiv
+# Optional: erkannte Vertraege automatisch an Vertragsmanagement pushen
+# CONTRACT_MANAGER_URL=https://contracts.boettcher.vip
+# CONTRACT_MANAGER_INTAKE_KEY=...
 EOF
 chmod 600 "$DOKUSCAN_DIR/.env"
 chown pi:pi "$DOKUSCAN_DIR/.env"
