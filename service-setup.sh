@@ -10,13 +10,22 @@ echo "[DokuScan] Systemd Service einrichten..."
 if [ -z "$ANTHROPIC_API_KEY" ]; then
   read -rp "Anthropic API Key (sk-ant-...): " ANTHROPIC_API_KEY
 fi
+# Web-UI Login (Basic Auth): aus Umgebung oder Benutzer abfragen / Passwort generieren
+if [ -z "$DOKUSCAN_USER" ]; then
+  read -rp "Web-UI Benutzername [admin]: " DOKUSCAN_USER
+  DOKUSCAN_USER="${DOKUSCAN_USER:-admin}"
+fi
+DOKUSCAN_PASS="${DOKUSCAN_PASS:-$(openssl rand -base64 18)}"
 
 # .env Datei erstellen
 cat > "$ENV_FILE" << EOF
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 SCAN_EINGANG=/home/pi/Scanner/Eingang
 SCAN_ARCHIV=/home/pi/Scanner/Archiv
+DOKUSCAN_USER=${DOKUSCAN_USER}
+DOKUSCAN_PASS=${DOKUSCAN_PASS}
 EOF
+echo "Web-UI Login: ${DOKUSCAN_USER} / ${DOKUSCAN_PASS}  (steht nur hier und in .env)"
 chmod 600 "$ENV_FILE"
 chown pi:pi "$ENV_FILE"
 

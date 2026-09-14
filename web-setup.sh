@@ -14,6 +14,12 @@ chown -R pi:pi "$DOKUSCAN_DIR"
 
 echo "[DokuScan Web] WEB_PORT zur .env hinzufügen..."
 grep -q WEB_PORT "$DOKUSCAN_DIR/.env" || echo "WEB_PORT=3001" >> "$DOKUSCAN_DIR/.env"
+# Basic-Auth-Zugang nachziehen, falls .env aus älterer Installation stammt
+if ! grep -qE '^DOKUSCAN_PASS=.+' "$DOKUSCAN_DIR/.env"; then
+  DOKUSCAN_PASS="${DOKUSCAN_PASS:-$(openssl rand -base64 18)}"
+  printf 'DOKUSCAN_USER=%s\nDOKUSCAN_PASS=%s\n' "${DOKUSCAN_USER:-admin}" "$DOKUSCAN_PASS" >> "$DOKUSCAN_DIR/.env"
+  echo "Web-UI Login: ${DOKUSCAN_USER:-admin} / ${DOKUSCAN_PASS}  (steht nur hier und in .env)"
+fi
 
 echo "[DokuScan Web] Richte systemd Service ein..."
 cat > /etc/systemd/system/dokuscan-web.service << 'EOF'

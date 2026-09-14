@@ -4,6 +4,7 @@
 const express  = require('express');
 const path     = require('path');
 const fs       = require('fs');
+const crypto   = require('crypto');
 const multer   = require('multer');
 const archiver = require('archiver');
 require('dotenv').config();
@@ -17,6 +18,29 @@ const LOG_DIR     = path.join(__dirname, 'logs');
 const ERROR_LOG   = path.join(LOG_DIR, 'error.log');
 const STATUS_FILE = path.join(LOG_DIR, 'status.json');
 
+// ── HTTP Basic Auth vor ALLEN Routen (fail-closed) ───────────────────────────
+const AUTH_USER = process.env.DOKUSCAN_USER;
+const AUTH_PASS = process.env.DOKUSCAN_PASS;
+if (!AUTH_USER || !AUTH_PASS) {
+  console.error('[DokuScan Web] ❌ DOKUSCAN_USER und DOKUSCAN_PASS müssen in .env gesetzt sein – Web-UI startet nicht.');
+  process.exit(1);
+}
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
+app.use((req, res, next) => {
+  const [scheme, b64] = (req.headers.authorization || '').split(' ');
+  if (scheme === 'Basic' && b64) {
+    const [user, ...rest] = Buffer.from(b64, 'base64').toString().split(':');
+    const okUser = safeEqual(user, AUTH_USER);
+    const okPass = safeEqual(rest.join(':'), AUTH_PASS);
+    if (okUser && okPass) return next();
+  }
+  res.set('WWW-Authenticate', 'Basic realm="DokuScan", charset="UTF-8"');
+  res.status(401).send('Anmeldung erforderlich');
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -24,7 +48,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => { fs.mkdirSync(EINGANG, { recursive: true }); cb(null, EINGANG); },
-    filename:    (req, file, cb) => cb(null, file.originalname),
+    filename:    (req, file, cb) => {
+      let name = path.basename(file.originalname).replace(/[^A-Za-z0-9._ -]/g, '_');
+      if (!name || name.startsWith('.')) name = `upload_${Date.now()}${path.extname(file.originalname).toLowerCase()}`;
+      if (!path.resolve(EINGANG, name).startsWith(path.resolve(EINGANG) + path.sep)) return cb(new Error('Ungültiger Dateiname'));
+      cb(null, name);
+    },
   }),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
   fileFilter: (req, file, cb) => {
@@ -36,9 +65,13 @@ const upload = multer({
 // ── Hilfsfunktionen ───────────────────────────────────────────────────────────
 function safeAbs(rel) {
   const full = path.resolve(path.join(ARCHIV, rel));
-  if (!full.startsWith(path.resolve(ARCHIV))) throw new Error('Path traversal');
+  if (!full.startsWith(path.resolve(ARCHIV) + path.sep)) throw new Error('Path traversal');
   return full;
 }
+
+// Dokument-ID: base64url (kein '/', '+', '=' → sicher in Express-Routen-Params)
+const encId = rel => Buffer.from(rel).toString('base64url');
+const decId = id  => Buffer.from(id, 'base64url').toString();
 
 function readMeta(filePath) {
   try { return JSON.parse(fs.readFileSync(filePath + '.meta.json', 'utf8')); } catch { return {}; }
@@ -50,7 +83,7 @@ function docFromFile(kat, file) {
   const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
   const meta      = readMeta(filePath);
   return {
-    id:             Buffer.from(path.join(kat, file)).toString('base64'),
+    id:             encId(path.join(kat, file)),
     name:           file,
     kategorie:      kat,
     datum:          meta.datum           || (dateMatch ? dateMatch[1] : null),
@@ -96,7 +129,7 @@ app.post('/api/upload', upload.array('files', 20), (req, res) => {
 // ── API: Download einzelne Datei ──────────────────────────────────────────────
 app.get('/api/download/:id', (req, res) => {
   try {
-    const rel  = Buffer.from(req.params.id, 'base64').toString();
+    const rel  = decId(req.params.id);
     const full = safeAbs(rel);
     if (!fs.existsSync(full)) return res.status(404).send('Nicht gefunden');
     res.download(full);
@@ -106,7 +139,7 @@ app.get('/api/download/:id', (req, res) => {
 // ── API: Vorschau einzelne Datei (inline im Browser) ─────────────────────────
 app.get('/api/preview/:id', (req, res) => {
   try {
-    const rel  = Buffer.from(req.params.id, 'base64').toString();
+    const rel  = decId(req.params.id);
     const full = safeAbs(rel);
     if (!fs.existsSync(full)) return res.status(404).send('Nicht gefunden');
     const stat = fs.statSync(full);
@@ -119,9 +152,14 @@ app.get('/api/preview/:id', (req, res) => {
 });
 
 // ── API: Dokument neu analysieren ─────────────────────────────────────────────
+const reanalyzeHits = new Map(); // IP → Zeitstempel der letzten Aufrufe
 app.post('/api/reanalyze/:id', async (req, res) => {
+  const now  = Date.now();
+  const hits = (reanalyzeHits.get(req.ip) || []).filter(t => now - t < 10 * 60 * 1000);
+  if (hits.length >= 10) return res.status(429).json({ error: 'Zu viele Anfragen – max. 10 pro 10 Minuten' });
+  hits.push(now); reanalyzeHits.set(req.ip, hits);
   try {
-    const rel  = Buffer.from(req.params.id, 'base64').toString();
+    const rel  = decId(req.params.id);
     const full = safeAbs(rel);
     if (!fs.existsSync(full)) return res.status(404).json({ error: 'Nicht gefunden' });
     const { reanalyzeDocument } = require('./server');
@@ -165,7 +203,7 @@ app.patch('/api/rename/:id', (req, res) => {
     if (!newName || newName.includes('/') || newName.includes('..'))
       return res.status(400).json({ error: 'Ungültiger Name' });
 
-    const rel     = Buffer.from(req.params.id, 'base64').toString();
+    const rel     = decId(req.params.id);
     const oldFull = safeAbs(rel);
     const kat     = path.dirname(rel);
     const newFull = safeAbs(path.join(kat, newName));
@@ -188,7 +226,7 @@ app.patch('/api/kategorize/:id', (req, res) => {
     const validKats  = ['Rechnung','Vertrag','Kontoauszug','Versicherung','Brief','Steuer','Behoerde','Medizin','Sonstiges','Pruefen'];
     if (!validKats.includes(newKat)) return res.status(400).json({ error: 'Ungültige Kategorie' });
 
-    const rel     = Buffer.from(req.params.id, 'base64').toString();
+    const rel     = decId(req.params.id);
     const oldFull = safeAbs(rel);
     const file    = path.basename(rel);
     const newDir  = path.join(ARCHIV, newKat);
@@ -222,7 +260,7 @@ app.get('/api/status', (req, res) => {
   try {
     const raw = fs.readFileSync(STATUS_FILE, 'utf8');
     const saved = JSON.parse(raw);
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
     queueStatus = {
       queueLength:    saved.queueLength    || 0,
       currentFile:    saved.currentFile    || null,
@@ -265,7 +303,7 @@ app.get('/api/stats', (req, res) => {
   try {
     const raw   = fs.readFileSync(STATUS_FILE, 'utf8');
     const saved = JSON.parse(raw);
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
     if (saved.date === today) {
       stats.processedToday = saved.processedToday || 0;
       stats.errorCount     = saved.errorCount     || 0;

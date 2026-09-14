@@ -6,11 +6,12 @@ const path      = require('path');
 const os        = require('os');
 const chokidar  = require('chokidar');
 const Anthropic = require('@anthropic-ai/sdk');
-const { execSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const { PDFDocument } = require('pdf-lib');
 require('dotenv').config();
 
-const client  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 120000 });
+const MODEL   = process.env.ANTHROPIC_MODEL || 'claude-opus-4-6';
 const EINGANG = process.env.SCAN_EINGANG || '/home/pi/Scanner/Eingang';
 const ARCHIV  = process.env.SCAN_ARCHIV  || '/home/pi/Scanner/Archiv';
 const KATEGORIEN = ['Rechnung','Vertrag','Kontoauszug','Versicherung','Brief','Steuer','Behoerde','Medizin','Sonstiges','Pruefen'];
@@ -41,7 +42,7 @@ function loadStatus() {
   try {
     const raw = fs.readFileSync(STATUS_FILE, 'utf8');
     const saved = JSON.parse(raw);
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
     if (saved.date === today) {
       statusState.processedToday = saved.processedToday || 0;
       statusState.errorCount     = saved.errorCount     || 0;
@@ -50,7 +51,7 @@ function loadStatus() {
 }
 
 function saveStatus() {
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
   try {
     fs.writeFileSync(STATUS_FILE, JSON.stringify({
       ...statusState,
@@ -84,30 +85,44 @@ function safePath(base, ...segments) {
   return resolved;
 }
 
+// Externes Tool ohne Shell ausführen; bei Timeout werfen (→ per-Datei-Fallback greift)
+function run(cmd, args, timeout) {
+  const r = spawnSync(cmd, args, { encoding: 'utf8', timeout, killSignal: 'SIGKILL' });
+  if (r.error?.code === 'ETIMEDOUT') throw r.error;
+  return r;
+}
+
+// JSON aus KI-Antwort ziehen; ohne JSON-Block werfen (→ Datei landet in Pruefen)
+function aiJson(res) {
+  const m = res.content[0].text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('KI-Antwort enthält kein JSON');
+  return JSON.parse(m[0]);
+}
+
 // ── Leerseite / Durchschimmer-Seite erkennen ─────────────────────────────────
 // Rendert die Seite und misst den Anteil dunkler Pixel.
 // Echter Inhalt hat >2%, reiner Durchschimmer liegt meist bei <1.5%.
 function isBlankPage(filePath, page) {
   try {
     const tmp = path.join(os.tmpdir(), `ds_blank_${page}_${Date.now()}`);
-    spawnSync('pdftoppm', ['-jpeg', '-r', '72', '-f', String(page), '-l', String(page), filePath, tmp]);
+    run('pdftoppm', ['-jpeg', '-r', '72', '-f', String(page), '-l', String(page), filePath, tmp], 60000);
     const dir   = path.dirname(tmp);
     const match = fs.readdirSync(dir).find(f => f.startsWith(path.basename(tmp) + '-') && f.endsWith('.jpg'));
     if (!match) return false;
     const imgPath = path.join(dir, match);
 
     // Zähle dunkle Pixel (Wert < 128 in Graustufen)
-    const result = spawnSync('convert', [
+    const result = run('convert', [
       imgPath, '-colorspace', 'Gray', '-threshold', '60%',
       '-format', '%[fx:mean]', 'info:'
-    ], { encoding: 'utf8' });
+    ], 60000);
     try { fs.unlinkSync(imgPath); } catch {}
 
     const mean = parseFloat(result.stdout);
     // mean = Anteil weißer Pixel nach Threshold; 1-mean = dunkle Pixel
     // Leerseite/Durchschimmer: fast alles weiß → mean > 0.985
     return !isNaN(mean) && mean > 0.985;
-  } catch { return false; }
+  } catch (e) { if (e.code === 'ETIMEDOUT') throw e; return false; }
 }
 
 // ── Leere Rückseiten aus PDF entfernen ───────────────────────────────────────
@@ -141,17 +156,17 @@ async function removeBlankPages(filePath, pageCount) {
 function repairPDF(filePath) {
   const repaired = filePath.replace(/\.pdf$/i, '_repaired.pdf');
   try {
-    const result = spawnSync('gs', [
+    const result = run('gs', [
       '-dBATCH', '-dNOPAUSE', '-dSAFER', '-sDEVICE=pdfwrite',
       `-sOutputFile=${repaired}`, filePath
-    ], { timeout: 30000 });
+    ], 60000);
     if (result.status === 0 && fs.existsSync(repaired) && fs.statSync(repaired).size > 100) {
       fs.copyFileSync(repaired, filePath);
       fs.unlinkSync(repaired);
       console.log(`[DokuScan] 🔧 PDF repariert: ${path.basename(filePath)}`);
       return true;
     }
-  } catch {}
+  } catch (e) { if (e.code === 'ETIMEDOUT') throw e; }
   try { fs.unlinkSync(repaired); } catch {}
   return false;
 }
@@ -159,18 +174,18 @@ function repairPDF(filePath) {
 // ── Seitenanzahl ermitteln ────────────────────────────────────────────────────
 function getPageCount(filePath) {
   try {
-    const out = execSync(`pdfinfo "${filePath}"`, { encoding: 'utf8' });
+    const out = run('pdfinfo', [filePath], 30000).stdout || '';
     const m   = out.match(/Pages:\s+(\d+)/);
     return m ? parseInt(m[1]) : 1;
-  } catch { return 1; }
+  } catch (e) { if (e.code === 'ETIMEDOUT') throw e; return 1; }
 }
 
 // ── Text einer einzelnen Seite extrahieren ────────────────────────────────────
 function getPageText(filePath, page) {
   try {
-    return execSync(`pdftotext -f ${page} -l ${page} "${filePath}" -`, { encoding: 'utf8' })
+    return (run('pdftotext', ['-f', String(page), '-l', String(page), filePath, '-'], 30000).stdout || '')
       .replace(/\s+/g, ' ').trim().substring(0, 1500);
-  } catch { return ''; }
+  } catch (e) { if (e.code === 'ETIMEDOUT') throw e; return ''; }
 }
 
 // ── Seiten-Fortsetzungssignal erkennen ────────────────────────────────────────
@@ -182,7 +197,7 @@ function hasContinuationSignal(text) {
 function renderPageAsBase64(filePath, page) {
   try {
     const tmp = path.join(os.tmpdir(), `ds_p${page}_${Date.now()}`);
-    spawnSync('pdftoppm', ['-jpeg', '-r', '250', '-f', String(page), '-l', String(page), filePath, tmp]);
+    run('pdftoppm', ['-jpeg', '-r', '250', '-f', String(page), '-l', String(page), filePath, tmp], 60000);
 
     const dir     = path.dirname(tmp);
     const prefix  = path.basename(tmp) + '-';
@@ -193,7 +208,7 @@ function renderPageAsBase64(filePath, page) {
 
     // Starke Aufwertung: Normalisierung + Kontrast + Schärfen + Pegelkorrektur
     const enhanced = imgPath.replace('.jpg', '_enh.jpg');
-    const magick = spawnSync('convert', [
+    const magick = run('convert', [
       imgPath,
       '-normalize',
       '-auto-level',
@@ -201,7 +216,7 @@ function renderPageAsBase64(filePath, page) {
       '-sharpen', '0x1.5',
       '-level', '5%,90%',
       enhanced
-    ]);
+    ], 60000);
     if (magick.status === 0 && fs.existsSync(enhanced)) {
       fs.unlinkSync(imgPath);
       imgPath = enhanced;
@@ -210,14 +225,14 @@ function renderPageAsBase64(filePath, page) {
     const data = fs.readFileSync(imgPath).toString('base64');
     fs.unlinkSync(imgPath);
     return data;
-  } catch { return null; }
+  } catch (e) { if (e.code === 'ETIMEDOUT') throw e; return null; }
 }
 
 // ── Gespiegelten Scan erkennen und korrigieren ────────────────────────────────
 function fixMirroredScan(filePath) {
   try {
     const tmp   = path.join(os.tmpdir(), `ds_mirror_${Date.now()}`);
-    spawnSync('pdftoppm', ['-jpeg', '-r', '150', '-f', '1', '-l', '1', filePath, tmp]);
+    run('pdftoppm', ['-jpeg', '-r', '150', '-f', '1', '-l', '1', filePath, tmp], 60000);
     const dir   = path.dirname(tmp);
     const match = fs.readdirSync(dir).find(f => f.startsWith(path.basename(tmp) + '-') && f.endsWith('.jpg'));
     if (!match) return false;
@@ -225,14 +240,14 @@ function fixMirroredScan(filePath) {
     const imgPath = path.join(dir, match);
 
     // Probiere OCR – wenn normales Bild keinen Text liefert, versuche gespiegelt
-    const ocrNormal = spawnSync('tesseract', [imgPath, 'stdout', '-l', 'deu+eng', '--psm', '3'], { encoding: 'utf8' });
+    const ocrNormal = run('tesseract', [imgPath, 'stdout', '-l', 'deu+eng', '--psm', '3'], 30000);
     const wordsNormal = (ocrNormal.stdout || '').trim().split(/\s+/).filter(w => w.length > 3).length;
 
     if (wordsNormal < 5) {
       // Bild horizontal spiegeln und nochmal OCR
       const flipped = imgPath.replace('.jpg', '_flop.jpg');
-      spawnSync('convert', [imgPath, '-flop', flipped]);
-      const ocrFlipped = spawnSync('tesseract', [flipped, 'stdout', '-l', 'deu+eng', '--psm', '3'], { encoding: 'utf8' });
+      run('convert', [imgPath, '-flop', flipped], 60000);
+      const ocrFlipped = run('tesseract', [flipped, 'stdout', '-l', 'deu+eng', '--psm', '3'], 30000);
       const wordsFlipped = (ocrFlipped.stdout || '').trim().split(/\s+/).filter(w => w.length > 3).length;
 
       try { fs.unlinkSync(flipped); } catch {}
@@ -240,13 +255,13 @@ function fixMirroredScan(filePath) {
       if (wordsFlipped > wordsNormal + 3) {
         // Gespiegelt → Seiten in PDF horizontal spiegeln
         const fixed = filePath.replace(/\.pdf$/i, '_fixed.pdf');
-        const gs = spawnSync('gs', [
+        const gs = run('gs', [
           '-dBATCH', '-dNOPAUSE', '-dSAFER',
           '-sDEVICE=pdfwrite',
           `-sOutputFile=${fixed}`,
           '-c', '<</BeginPage { pop 1 0 translate -1 1 scale } >> setpagedevice',
           '-f', filePath
-        ], { timeout: 30000 });
+        ], 60000);
         if (gs.status === 0 && fs.existsSync(fixed) && fs.statSync(fixed).size > 100) {
           fs.copyFileSync(fixed, filePath);
           fs.unlinkSync(fixed);
@@ -259,7 +274,7 @@ function fixMirroredScan(filePath) {
     }
     try { fs.unlinkSync(imgPath); } catch {}
     return false;
-  } catch { return false; }
+  } catch (e) { if (e.code === 'ETIMEDOUT') throw e; return false; }
 }
 
 // ── KI erkennt Dokumentgrenzen ────────────────────────────────────────────────
@@ -330,16 +345,15 @@ async function detectBoundaries(filePath, pageCount) {
   }
 
   const response = await withRetry(() => client.messages.create({
-    model:      'claude-opus-4-6',
+    model:      MODEL,
     max_tokens: 1024,
     messages:   [{ role: 'user', content }]
   }));
 
-  const raw    = response.content[0].text.match(/\{[\s\S]*\}/)[0];
-  const result = JSON.parse(raw);
+  const result = aiJson(response);
 
   // Seiten mit Fortsetzungssignal können kein Dokumentstart sein
-  const rawBoundaries = [...new Set([1, ...result.boundaries])]
+  const rawBoundaries = [...new Set([1, ...(result.boundaries ?? [])])]
     .filter(n => n >= 1 && n <= pageCount && !forcedContinuation.has(n))
     .sort((a, b) => a - b);
 
@@ -386,23 +400,30 @@ async function analyzeDocument(filePath) {
   if (['.jpg','.jpeg','.png','.tiff','.tif','.webp'].includes(ext)) {
     const b64  = fs.readFileSync(filePath).toString('base64');
     const mime = ext==='.jpg'||ext==='.jpeg'?'image/jpeg':ext==='.png'?'image/png':ext==='.webp'?'image/webp':'image/tiff';
-    const res  = await client.messages.create({
-      model: 'claude-opus-4-6', max_tokens: 512,
+    const res  = await withRetry(() => client.messages.create({
+      model: MODEL, max_tokens: 512,
       messages: [{ role:'user', content: [{ type:'image', source:{ type:'base64', media_type:mime, data:b64 }}, { type:'text', text:prompt }] }]
-    });
-    return JSON.parse(res.content[0].text.match(/\{[\s\S]*\}/)[0]);
+    }));
+    return aiJson(res);
   }
 
   // PDF: Text extrahieren
-  const text = (() => { try { return execSync(`pdftotext "${filePath}" -`, { encoding:'utf8' }).trim().substring(0,3000); } catch { return ''; } })();
+  const text = (() => { try { return (run('pdftotext', [filePath, '-'], 30000).stdout || '').trim().substring(0,3000); } catch (e) { if (e.code === 'ETIMEDOUT') throw e; return ''; } })();
 
   // Wenn kein Text vorhanden → sofort auf Bildanalyse umschalten
   const b64 = renderPageAsBase64(filePath, 1);
+  // Gescannter Mehrseiter ohne Textebene: zusätzlich letzte Seite (Summe/Betrag steht oft dort)
+  const pageCount = getPageCount(filePath);
+  const b64Last   = (text.length < 50 && pageCount > 1) ? renderPageAsBase64(filePath, pageCount) : null;
 
   let msgContent;
   if (b64) {
     msgContent = [
       { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:b64 } },
+      ...(b64Last ? [
+        { type:'text', text:`--- Letzte Seite (${pageCount}) ---` },
+        { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:b64Last } },
+      ] : []),
       { type:'text', text: text ? `${prompt}\n\nExtrahierter Text:\n${text}` : prompt }
     ];
   } else if (text) {
@@ -412,17 +433,17 @@ async function analyzeDocument(filePath) {
   }
 
   const res = await withRetry(() => client.messages.create({
-    model: 'claude-opus-4-6', max_tokens: 512,
+    model: MODEL, max_tokens: 512,
     messages: [{ role:'user', content: msgContent }]
   }));
-  return JSON.parse(res.content[0].text.match(/\{[\s\S]*\}/)[0]);
+  return aiJson(res);
 }
 
 async function archiveDocument(filePath, originalName, pageCount) {
   const analysis  = await analyzeDocument(filePath);
   const kategorie = KATEGORIEN.includes(analysis.kategorie) ? analysis.kategorie : 'Sonstiges';
   const ext       = path.extname(filePath);
-  const datum     = analysis.datum || new Date().toISOString().split('T')[0];
+  const datum     = analysis.datum || new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
   const abs       = sanitize(analysis.absender || 'Unbekannt');
   const desc      = sanitize(analysis.beschreibung || '');
   const filename  = `${datum}_${kategorie}_${abs}${desc?'_'+desc:''}${ext}`;
@@ -521,7 +542,7 @@ async function processFile(filePath) {
   try {
     if (ext === '.pdf') {
       // PDF-Integrität prüfen – bei xref-Fehler Reparatur versuchen
-      const pdfInfo = spawnSync('pdfinfo', [filePath], { encoding: 'utf8' });
+      const pdfInfo = run('pdfinfo', [filePath], 30000);
       if (pdfInfo.stderr && /xref|trailer/i.test(pdfInfo.stderr)) {
         console.log(`[DokuScan] 🔧 Korrupte PDF – versuche Reparatur…`);
         repairPDF(filePath);
@@ -561,10 +582,12 @@ async function processFile(filePath) {
 
         if (ranges.length > 1) {
           const parts = await splitPDF(filePath, ranges);
-          fs.unlinkSync(filePath);
           for (const { tmpPath, pageCount: partPages } of parts) {
             await archiveDocument(tmpPath, origName, partPages);
           }
+          // Original erst löschen, wenn ALLE Teile archiviert sind – sonst greift
+          // der Fallback (Kopie nach Pruefen/) bei einem Fehler ins Leere.
+          fs.unlinkSync(filePath);
           return;
         }
       }
@@ -577,7 +600,7 @@ async function processFile(filePath) {
     logError(origName, err.message);
     statusState.errorCount++;
     saveStatus();
-    const fallback = path.join(ARCHIV, 'Sonstiges');
+    const fallback = path.join(ARCHIV, 'Pruefen');
     fs.mkdirSync(fallback, { recursive: true });
     try {
       fs.copyFileSync(filePath, path.join(fallback, origName));
@@ -666,15 +689,22 @@ async function reanalyzeDocument(fullPath) {
 module.exports = { reanalyzeDocument, analyzeDocument, ARCHIV, KATEGORIEN, withRetry };
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-fs.mkdirSync(EINGANG, { recursive: true });
-fs.mkdirSync(ARCHIV,  { recursive: true });
+// Nur als eigener Prozess (systemd dokuscan) – web-server.js lädt dieses Modul
+// per require() für reanalyzeDocument und darf KEINEN zweiten Watcher starten.
+if (require.main === module) {
+  fs.mkdirSync(EINGANG, { recursive: true });
+  fs.mkdirSync(ARCHIV,  { recursive: true });
 
-const watcher = chokidar.watch(EINGANG, {
-  ignored: /(^|[\/\\])\../,
-  persistent: true,
-  awaitWriteFinish: { stabilityThreshold: 3000, pollInterval: 500 }
-});
+  const missingTools = ['pdftoppm', 'pdftotext', 'pdfinfo', 'convert', 'gs', 'tesseract'].filter(t => spawnSync('which', [t]).status !== 0);
+  if (missingTools.length) console.warn(`[DokuScan] ⚠️  Fehlende Tools: ${missingTools.join(', ')} – Enhancement/Reparatur/Spiegel-Korrektur eingeschränkt`);
 
-watcher.on('add', enqueue);
-console.log(`[DokuScan] 🚀 Bereit – überwache ${EINGANG}`);
-console.log(`[DokuScan] 🤖 KI-Dokumentgrenzerkennung aktiv (sequenzielle Queue)`);
+  const watcher = chokidar.watch(EINGANG, {
+    ignored: /(^|[\/\\])\../,
+    persistent: true,
+    awaitWriteFinish: { stabilityThreshold: 3000, pollInterval: 500 }
+  });
+
+  watcher.on('add', enqueue);
+  console.log(`[DokuScan] 🚀 Bereit – überwache ${EINGANG}`);
+  console.log(`[DokuScan] 🤖 KI-Dokumentgrenzerkennung aktiv (sequenzielle Queue)`);
+}

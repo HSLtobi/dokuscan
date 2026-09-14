@@ -2,7 +2,8 @@
 set -e
 
 SMB_USER="scanner"
-SMB_PASS="dokuscan123"
+# Passwort aus Umgebung (SMB_PASS=...) oder einmalig generieren – nie im Repo
+SMB_PASS="${SMB_PASS:-$(openssl rand -base64 18)}"
 SHARE_DIR="/home/pi/Scanner"
 
 echo "[DokuScan] Installiere Samba..."
