@@ -210,6 +210,7 @@ function renderPageAsBase64(filePath, page) {
     const enhanced = imgPath.replace('.jpg', '_enh.jpg');
     const magick = run('convert', [
       imgPath,
+      '-deskew', '40%',
       '-normalize',
       '-auto-level',
       '-contrast', '-contrast',
@@ -240,7 +241,12 @@ function fixMirroredScan(filePath) {
     const imgPath = path.join(dir, match);
 
     // Probiere OCR – wenn normales Bild keinen Text liefert, versuche gespiegelt
-    const ocrNormal = run('tesseract', [imgPath, 'stdout', '-l', 'deu+eng', '--psm', '3'], 30000);
+    // Deskew + Normalize vor OCR → robusterer Mirror-Test bei schrägen Scans
+    const imgEnh = imgPath.replace('.jpg', '_enh.jpg');
+    const enhR = run('convert', [imgPath, '-deskew', '40%', '-normalize', imgEnh], 30000);
+    const ocrSrc = (enhR.status === 0 && fs.existsSync(imgEnh)) ? imgEnh : imgPath;
+    const ocrNormal = run('tesseract', [ocrSrc, 'stdout', '-l', 'deu+eng', '--psm', '3'], 30000);
+    try { if (ocrSrc !== imgPath) fs.unlinkSync(imgEnh); } catch {}
     const wordsNormal = (ocrNormal.stdout || '').trim().split(/\s+/).filter(w => w.length > 3).length;
 
     if (wordsNormal < 5) {
@@ -416,15 +422,29 @@ async function analyzeDocument(filePath) {
   const pageCount = getPageCount(filePath);
   const b64Last   = (text.length < 50 && pageCount > 1) ? renderPageAsBase64(filePath, pageCount) : null;
 
+  // Tesseract-OCR als Fallback für Scan-PDFs ohne pdftotext-Inhalt
+  let ocrText = '';
+  if (text.length < 50 && b64) {
+    const tmpOcr = path.join(os.tmpdir(), `ds_ocr_${Date.now()}.jpg`);
+    try {
+      fs.writeFileSync(tmpOcr, Buffer.from(b64, 'base64'));
+      const tess = run('tesseract', [tmpOcr, 'stdout', '-l', 'deu+eng', '--psm', '3', '--oem', '1'], 60000);
+      ocrText = (tess.stdout || '').replace(/\s+/g, ' ').trim().substring(0, 3000);
+      if (ocrText.length > 20) console.log(`[DokuScan] 📝 Tesseract OCR: ${ocrText.length} Zeichen`);
+    } catch (e) { if (e.code === 'ETIMEDOUT') throw e; }
+    try { fs.unlinkSync(tmpOcr); } catch {}
+  }
+
   let msgContent;
   if (b64) {
+    const textForPrompt = text || ocrText;
     msgContent = [
       { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:b64 } },
       ...(b64Last ? [
         { type:'text', text:`--- Letzte Seite (${pageCount}) ---` },
         { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:b64Last } },
       ] : []),
-      { type:'text', text: text ? `${prompt}\n\nExtrahierter Text:\n${text}` : prompt }
+      { type:'text', text: textForPrompt ? `${prompt}\n\nExtrahierter Text:\n${textForPrompt}` : prompt }
     ];
   } else if (text) {
     msgContent = `${prompt}\n\nDokumenteninhalt:\n${text}`;
