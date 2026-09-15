@@ -90,17 +90,23 @@
 
     /* ── Stat bar ── */
     .statbar {
-      display: flex; align-items: center; gap: 0;
-      padding: 0 24px; background: rgba(255,255,255,.015);
+      display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap;
+      padding: 14px 24px; background: rgba(255,255,255,.01);
       border-bottom: 1px solid var(--border);
     }
-    .stat { display: flex; align-items: baseline; gap: 8px; padding: 12px 24px 12px 0; }
-    .stat-val { font-size: 24px; font-weight: 700; letter-spacing: -1px; }
-    .stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-    .stat-sep { width: 1px; height: 24px; background: var(--border); margin: 0 24px 0 0; }
-    .prog-wrap { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-    .prog-bar { width: 140px; height: 2px; background: rgba(255,255,255,.06); border-radius: 1px; overflow: hidden; }
-    .prog-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 1px; transition: width .5s ease; }
+    .stat {
+      display: flex; flex-direction: column; gap: 5px;
+      padding: 11px 16px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 10px; min-width: 94px;
+      transition: border-color .15s;
+    }
+    .stat:hover { border-color: var(--border-bright); }
+    .stat-val { font-size: 22px; font-weight: 700; letter-spacing: -1px; line-height: 1; }
+    .stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+    .stat-sep { display: none; }
+    .prog-wrap { margin-left: auto; display: flex; align-items: center; gap: 12px; align-self: center; }
+    .prog-bar { width: 120px; height: 3px; background: rgba(255,255,255,.06); border-radius: 2px; overflow: hidden; }
+    .prog-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 2px; transition: width .5s ease; }
     .prog-pct { font-size: 11px; color: var(--muted); min-width: 32px; text-align: right; }
 
     /* ── Sidebar ── */
@@ -165,13 +171,14 @@
     }
     .doc-row {
       display: grid; grid-template-columns: 40px 1fr 160px 100px 100px 110px 110px;
-      gap: 12px; padding: 10px 20px; align-items: center;
-      border-bottom: 1px solid var(--border); transition: background .1s; cursor: default;
+      gap: 12px; padding: 13px 20px; align-items: center;
+      border-bottom: 1px solid var(--border); transition: background .12s; cursor: default;
     }
-    .doc-row:hover { background: var(--surface-hover); }
+    .doc-row:hover { background: rgba(255,255,255,.04); }
+    .doc-row:hover .doc-icon { transform: scale(1.08); }
     .doc-icon {
-      width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center;
-      justify-content: center; font-size: 14px; flex-shrink: 0;
+      width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center;
+      justify-content: center; font-size: 15px; flex-shrink: 0; transition: transform .12s;
     }
     .doc-name-text {
       font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -474,10 +481,23 @@ async function reanalyzeDoc(id, name) {
 
 function openPreview(id, name) {
   const overlay = document.getElementById('pdfModal');
+  const frame   = document.getElementById('pdfModalFrame');
   document.getElementById('pdfModalTitle').textContent = name;
-  document.getElementById('pdfModalFrame').src = '/api/preview/' + id;
+  if (frame.src.startsWith('blob:')) { URL.revokeObjectURL(frame.src); }
+  frame.removeAttribute('srcdoc');
+  frame.src = '';
+  frame.srcdoc = '<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh;font:13px/1.6 sans-serif;color:#555">Lade…</body>';
   overlay.classList.add('open');
   requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add('visible')));
+  fetch('/api/preview/' + id)
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+    .then(blob => {
+      frame.removeAttribute('srcdoc');
+      frame.src = URL.createObjectURL(blob);
+    })
+    .catch(e => {
+      frame.srcdoc = '<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh;font:13px/1.6 sans-serif;color:#ef4444">Fehler beim Laden: ' + e.message + '</body>';
+    });
 }
 
 function closePreview() {
@@ -485,7 +505,10 @@ function closePreview() {
   overlay.classList.remove('visible');
   setTimeout(() => {
     overlay.classList.remove('open');
-    document.getElementById('pdfModalFrame').src = '';
+    const frame = document.getElementById('pdfModalFrame');
+    if (frame.src.startsWith('blob:')) URL.revokeObjectURL(frame.src);
+    frame.src = '';
+    frame.removeAttribute('srcdoc');
   }, 200);
 }
 
@@ -641,13 +664,9 @@ function render() {
   // ── StatBar ──
   const statbar = h('div', { cls:'statbar' },
     h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:'#22c55e' } }, String(done)), h('span', { cls:'stat-lbl' }, 'Archiviert')),
-    h('div', { cls:'stat-sep' }),
-    h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:busy>0?'#f59e0b':'#2a2a3a' } }, String(busy)), h('span', { cls:'stat-lbl' }, 'In Eingang')),
-    h('div', { cls:'stat-sep' }),
+    h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:busy>0?'#f59e0b':'var(--muted)' } }, String(busy)), h('span', { cls:'stat-lbl' }, 'In Eingang')),
     h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:'var(--accent)' } }, String(CAT_KEYS.filter(k=>counts[k]).length)), h('span', { cls:'stat-lbl' }, 'Kategorien')),
-    S.processedToday > 0 ? h('div', { cls:'stat-sep' }) : null,
     S.processedToday > 0 ? h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:'#06b6d4' } }, String(S.processedToday)), h('span', { cls:'stat-lbl' }, 'Heute')) : null,
-    S.errorCount > 0 ? h('div', { cls:'stat-sep' }) : null,
     S.errorCount > 0 ? h('div', { cls:'stat' }, h('span', { cls:'stat-val', style:{ color:'var(--red)' } }, String(S.errorCount)), h('span', { cls:'stat-lbl' }, 'Fehler')) : null,
     h('div', { cls:'prog-wrap' },
       h('div', { cls:'prog-bar' }, h('div', { cls:'prog-fill', style:{ width:pct+'%' } })),
