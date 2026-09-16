@@ -42,7 +42,13 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// HTML immer revalidieren lassen — sonst zeigt der Browser nach einem Deploy
+// weiter die alte Oberfläche. ETag sorgt dafür, dass das meist nur ein 304 ist.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+  }
+}));
 
 // Multer: Uploads direkt in den Scanner-Eingang
 const upload = multer({
